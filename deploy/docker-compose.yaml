@@ -1,0 +1,88 @@
+version: '3.8'
+
+services:
+  tangerina-bot:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: tangerina-bot
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    ports:
+      - "5000:5000"
+    volumes:
+      - ../tangerina_persona.txt:/app/tangerina_persona.txt:ro
+      - ../logs:/app/logs
+    networks:
+      - tangerina-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  piper-tts:
+    build:
+      context: ./piper
+      dockerfile: Dockerfile
+    container_name: tangerina-piper-tts
+    restart: unless-stopped
+    environment:
+      - PIPER_BIN=/usr/local/bin/piper
+      - PIPER_MODEL_PATH=${PIPER_MODEL_PATH:-/app/models/pt_BR-faber-medium.onnx}
+      - ESPEAK_DATA=/usr/local/share/piper/espeak-ng-data
+    ports:
+      - "5001:5001"
+    volumes:
+      - piper_models:/app/models
+    networks:
+      - tangerina-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: tangerina-n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD:-changeme}
+      - N8N_HOST=${N8N_HOST:-localhost}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://localhost:5678/
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks:
+      - tangerina-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:5678/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    profiles:
+      - n8n
+
+networks:
+  tangerina-network:
+    driver: bridge
+    name: tangerina-network
+
+volumes:
+  n8n_data:
+    name: tangerina-n8n-data
+  piper_models:
+    name: tangerina-piper-models
+

@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  piper-tts:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: piper-tts
+    restart: unless-stopped
+    environment:
+      - PIPER_BIN=/usr/local/bin/piper
+      - PIPER_MODEL_PATH=${PIPER_MODEL_PATH:-/app/models/pt_BR-faber-medium.onnx}
+    ports:
+      - "5001:5001"
+    volumes:
+      - ./models:/app/models
+    networks:
+      - tangerina-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  tangerina-network:
+    external: true
+
