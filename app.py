@@ -3,7 +3,7 @@ import logging
 import asyncio
 import threading
 import re
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 import discord
 from discord import Intents
 from discord.ext import commands
@@ -15,19 +15,14 @@ import yt_dlp
 from collections import deque
 import io
 import wave
+import subprocess
+import time
 
 try:
     from spotify_integration import SpotifyIntegration
 except ImportError:
     SpotifyIntegration = None
 
-try:
-    import audioop
-except ModuleNotFoundError as exc:
-    raise RuntimeError(
-        "O módulo 'audioop' é obrigatório para reprodução de áudio. "
-        "Em Python 3.13+, instale via 'pip install audioop-lts' e reinicie o bot."
-    ) from exc
 
 try:
     from elevenlabs import generate as tts_generate, set_api_key as set_eleven_api_key
@@ -178,6 +173,7 @@ class MusicBot:
         self.current_songs: Dict[int, dict] = {}
         self.main_loop: Optional[asyncio.AbstractEventLoop] = None
         self.voice_sinks: Dict[int, 'VoiceCommandSink'] = {}
+        self.original_volumes: Dict[int, float] = {}
 
     def _check_nacl(self):
         if nacl is None:
@@ -190,6 +186,18 @@ class MusicBot:
                     if guild_id not in self.voice_clients:
                         self.voice_clients[guild_id] = vc
                     return vc
+        return None
+
+    def _get_current_voice_channel(self, guild_id: int) -> Optional[discord.VoiceClient]:
+        for vc in bot.voice_clients:
+            if vc.guild.id == guild_id and vc.is_connected() and vc.channel:
+                if guild_id not in self.voice_clients:
+                    self.voice_clients[guild_id] = vc
+                return vc
+        if guild_id in self.voice_clients:
+            vc = self.voice_clients[guild_id]
+            if vc.is_connected() and vc.channel:
+                return vc
         return None
 
     async def _move_or_connect(self, guild_id: int, channel) -> Optional[discord.VoiceClient]:
@@ -224,8 +232,15 @@ class MusicBot:
             return None
 
         channel = guild.get_channel(channel_id)
+        if not channel:
+            try:
+                channel = await guild.fetch_channel(channel_id)
+            except (discord.errors.NotFound, discord.errors.Forbidden, discord.errors.HTTPException) as e:
+                logger.error(f'Voice channel {channel_id} not found or inaccessible: {e}')
+                return None
+        
         if not channel or not hasattr(channel, 'connect'):
-            logger.error(f'Voice channel {channel_id} not found')
+            logger.error(f'Channel {channel_id} is not a voice channel or cannot be connected to')
             return None
 
         existing = self._get_existing_voice_client(guild_id, channel_id)
@@ -281,6 +296,32 @@ class MusicBot:
             return None
 
         return await YTDLSource.search_youtube(youtube_query)
+
+    def get_current_music_source(self, guild_id: int) -> Optional[Dict[str, Any]]:
+        if guild_id not in self.voice_clients:
+            return None
+        
+        voice_client = self.voice_clients[guild_id]
+        is_connected = voice_client.is_connected()
+        is_playing = voice_client.is_playing()
+        if not is_connected or not is_playing:
+            return None
+        
+        current_song = self.current_songs.get(guild_id)
+        if not current_song:
+            return None
+        
+        current_volume = 0.5
+        if voice_client.source and isinstance(voice_client.source, discord.PCMVolumeTransformer):
+            current_volume = voice_client.source.volume
+        
+        result = {
+            'url': current_song.get('url'),
+            'title': current_song.get('title', 'Unknown'),
+            'volume': current_volume,
+            'is_playing': True
+        }
+        return result
 
 
 class VoiceCommandSink(voice_recv.AudioSink):
@@ -498,7 +539,7 @@ class VoiceCommandSink(voice_recv.AudioSink):
             return
 
         try:
-            response = chatbot.generate_response(chat_text)
+            response = await chatbot.generate_response(chat_text)
             await channel.send(response)
 
             if 'piper' in tts_providers and tts_providers['piper']:
@@ -593,6 +634,29 @@ def extract_message_data(message) -> dict:
     }
 
 
+async def _resolve_voice_channel(guild_id: int, channel_id: int) -> Tuple[Optional[int], Optional[str]]:
+    guild = bot.get_guild(guild_id)
+    if not guild:
+        return None, f'Guild {guild_id} not found'
+    
+    channel = guild.get_channel(channel_id)
+    if not channel:
+        try:
+            channel = await guild.fetch_channel(channel_id)
+        except (discord.errors.NotFound, discord.errors.Forbidden, discord.errors.HTTPException):
+            pass
+    
+    if channel and not isinstance(channel, (discord.VoiceChannel, discord.StageChannel)):
+        current_vc = music_bot._get_current_voice_channel(guild_id)
+        if current_vc and current_vc.channel:
+            channel_id = current_vc.channel.id
+            logger.info(f'Using bot\'s current voice channel {channel_id} instead of text channel {channel.id}')
+        else:
+            return None, f'Channel {channel_id} is a text channel. Please specify a voice channel or use EnterChannel first.'
+    
+    return channel_id, None
+
+
 async def get_user_voice_channel(guild_id: int, user_id: int) -> Dict[str, Any]:
     guild = bot.get_guild(guild_id)
     if not guild:
@@ -641,7 +705,11 @@ async def play_spotify_music(guild_id: int, channel_id: int, spotify_uri: str) -
     if not tracks:
         return {'success': False, 'error': 'No tracks found'}
 
-    voice_client = await music_bot.join_voice_channel(guild_id, channel_id)
+    resolved_channel_id, error = await _resolve_voice_channel(guild_id, channel_id)
+    if error:
+        return {'success': False, 'error': error}
+    
+    voice_client = await music_bot.join_voice_channel(guild_id, resolved_channel_id)
     if not voice_client:
         return {'success': False, 'error': 'Failed to join voice channel'}
 
@@ -674,7 +742,11 @@ async def play_music(guild_id: int, channel_id: int, query: str) -> Dict[str, An
         if any(re.search(pattern, query) for pattern in spotify_patterns):
             return await play_spotify_music(guild_id, channel_id, query)
 
-    voice_client = await music_bot.join_voice_channel(guild_id, channel_id)
+    resolved_channel_id, error = await _resolve_voice_channel(guild_id, channel_id)
+    if error:
+        return {'success': False, 'error': error}
+    
+    voice_client = await music_bot.join_voice_channel(guild_id, resolved_channel_id)
     if not voice_client:
         return {'success': False, 'error': 'Failed to join voice channel'}
 
@@ -747,6 +819,125 @@ async def get_queue(guild_id: int) -> Dict[str, Any]:
     }
 
 
+class MixedAudioSource(discord.AudioSource):
+    FRAME_SIZE = 3840
+    
+    def __init__(self, music_url: str, tts_file: str, music_volume: float = 0.2):
+        self.music_url = music_url
+        self.tts_file = tts_file
+        self.music_volume = music_volume
+        self.process = None
+        
+        filter_complex = f'[0:a]aformat=sample_rates=48000:channel_layouts=stereo,volume={music_volume}[a0];[1:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=1.0[a1];[a0][a1]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0'
+        
+        cmd = [
+            'ffmpeg',
+            '-reconnect', '1',
+            '-reconnect_streamed', '1',
+            '-reconnect_delay_max', '5',
+            '-i', music_url,
+            '-i', tts_file,
+            '-filter_complex', filter_complex,
+            '-f', 's16le',
+            '-ar', '48000',
+            '-ac', '2',
+            '-loglevel', 'warning',
+            '-'
+        ]
+        
+        try:
+            self.process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            time.sleep(0.2)
+            if self.process.poll() is not None:
+                stderr_output = self.process.stderr.read().decode('utf-8', errors='ignore') if self.process.stderr else ''
+                logger.error(f"MixedAudioSource FFmpeg process died immediately: {stderr_output}")
+                raise Exception(f"FFmpeg process died immediately with return code {self.process.returncode}: {stderr_output[:500]}")
+            else:
+                logger.info(f"MixedAudioSource FFmpeg process started successfully (PID: {self.process.pid}, music_url: {music_url[:80]}...)")
+        except Exception as e:
+            logger.error(f"Error starting FFmpeg process for audio mixing: {e}")
+            raise
+    
+    def read(self):
+        if self.process is None:
+            return b''
+        
+        try:
+            ret = self.process.stdout.read(self.FRAME_SIZE)
+            if len(ret) != self.FRAME_SIZE:
+                return b''
+            return ret
+        except Exception as e:
+            logger.error(f"Error reading from FFmpeg process: {e}")
+            return b''
+    
+    def cleanup(self):
+        if self.process:
+            try:
+                self.process.terminate()
+                self.process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait()
+            except Exception as e:
+                logger.error(f"Error cleaning up FFmpeg process: {e}")
+                try:
+                    self.process.kill()
+                except Exception:
+                    pass
+            self.process = None
+
+
+def _create_mixed_audio_source(music_url: str, tts_file: str, music_volume: float = 0.2) -> Optional[discord.AudioSource]:
+    try:
+        result = MixedAudioSource(music_url, tts_file, music_volume)
+        return result
+    except Exception as e:
+        logger.error(f"Error creating mixed audio source: {e}")
+        return None
+
+
+def _reduce_music_volume_for_tts(guild_id: int) -> Optional[float]:
+    if guild_id not in music_bot.voice_clients:
+        return None
+    
+    voice_client = music_bot.voice_clients[guild_id]
+    if not voice_client.is_connected() or not voice_client.is_playing():
+        return None
+    
+    if not voice_client.source or not isinstance(voice_client.source, discord.PCMVolumeTransformer):
+        return None
+    
+    original_volume = voice_client.source.volume
+    music_bot.original_volumes[guild_id] = original_volume
+    voice_client.source.volume = 0.2
+    
+    return original_volume
+
+
+def _restore_music_volume(guild_id: int, original_volume: Optional[float]) -> None:
+    if guild_id in music_bot.original_volumes:
+        volume_to_restore = music_bot.original_volumes.pop(guild_id)
+    elif original_volume is not None:
+        volume_to_restore = original_volume
+    else:
+        return
+    
+    if guild_id not in music_bot.voice_clients:
+        return
+    
+    voice_client = music_bot.voice_clients[guild_id]
+    if not voice_client.is_connected():
+        return
+    
+    if voice_client.source and isinstance(voice_client.source, discord.PCMVolumeTransformer):
+        voice_client.source.volume = volume_to_restore
+
+
 async def leave_music(guild_id: int) -> Dict[str, Any]:
     if guild_id not in music_bot.voice_clients:
         return {'success': False, 'error': 'Bot not in voice channel'}
@@ -755,6 +946,7 @@ async def leave_music(guild_id: int) -> Dict[str, Any]:
     del music_bot.voice_clients[guild_id]
     music_bot.queues.pop(guild_id, None)
     music_bot.current_songs.pop(guild_id, None)
+    music_bot.original_volumes.pop(guild_id, None)
 
     if guild_id in music_bot.voice_sinks:
         music_bot.voice_sinks[guild_id].cleanup()
@@ -764,6 +956,11 @@ async def leave_music(guild_id: int) -> Dict[str, Any]:
 
 
 async def speak_tts(guild_id: int, channel_id: int, text: str) -> Dict[str, Any]:
+    provider = os.getenv('TTS_PROVIDER', 'elevenlabs')
+    
+    if provider == 'piper':
+        return await speak_piper_tts(guild_id, channel_id, text)
+    
     api_key = os.getenv("ELEVEN_API_KEY")
     if tts_generate is None or not api_key:
         return {'success': False, 'error': 'TTS unavailable: missing dependency or ELEVEN_API_KEY'}
@@ -771,55 +968,152 @@ async def speak_tts(guild_id: int, channel_id: int, text: str) -> Dict[str, Any]
     if set_eleven_api_key:
         set_eleven_api_key(api_key)
 
-    voice_client = await music_bot.join_voice_channel(guild_id, channel_id)
+    resolved_channel_id, error = await _resolve_voice_channel(guild_id, channel_id)
+    if error:
+        return {'success': False, 'error': error}
+    
+    voice_client = await music_bot.join_voice_channel(guild_id, resolved_channel_id)
     if not voice_client:
         return {'success': False, 'error': 'Failed to join voice channel'}
 
-    was_playing = voice_client.is_playing()
+    music_source_info = music_bot.get_current_music_source(guild_id)
+    was_playing = music_source_info is not None
+    original_volume = None
+    use_mixing = False
+
     if was_playing:
-        voice_client.pause()
+        original_volume = _reduce_music_volume_for_tts(guild_id)
+        if original_volume is not None and music_source_info and music_source_info.get('url'):
+            use_mixing = True
 
-    audio_bytes = await asyncio.to_thread(
-        tts_generate,
-        text=text,
-        voice=ELEVEN_VOICE_ID,
-        model=ELEVEN_MODEL,
-        output_format=ELEVEN_OUTPUT_FORMAT,
-    )
+    try:
+        audio_bytes = await asyncio.to_thread(
+            tts_generate,
+            text=text,
+            voice=ELEVEN_VOICE_ID,
+            model=ELEVEN_MODEL,
+            output_format=ELEVEN_OUTPUT_FORMAT,
+        )
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_fp:
-        tmp_fp.write(audio_bytes)
-        tmp_path = tmp_fp.name
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_fp:
+            tmp_fp.write(audio_bytes)
+            tmp_path = tmp_fp.name
 
-    loop = music_bot.main_loop or asyncio.get_running_loop()
+        loop = music_bot.main_loop or asyncio.get_running_loop()
 
-    def after_play(error):
-        async def cleanup():
+        async def cleanup_tts():
             await asyncio.sleep(ELEVEN_CLEANUP_DELAY)
             try:
                 os.remove(tmp_path)
             except OSError:
                 pass
-            if was_playing and voice_client.is_paused():
-                voice_client.resume()
-        loop.call_soon_threadsafe(asyncio.create_task, cleanup())
+            if was_playing:
+                _restore_music_volume(guild_id, original_volume)
 
-    player = discord.PCMVolumeTransformer(discord.FFmpegPCMAudio(tmp_path, options='-vn'), volume=1.0)
-    voice_client.play(player, after=after_play)
-    return {'success': True, 'message': 'Speaking...'}
+        def after_play(error):
+            loop.call_soon_threadsafe(asyncio.create_task, cleanup_tts())
+
+        if use_mixing and music_source_info:
+            current_song = music_bot.current_songs.get(guild_id)
+            if current_song:
+                try:
+                    loop = asyncio.get_running_loop()
+                    song_url = current_song.get('url') or current_song.get('webpage_url', '')
+                    if song_url:
+                        fresh_song_data = await loop.run_in_executor(None, lambda: ytdl.extract_info(song_url, download=False))
+                        if fresh_song_data:
+                            if 'entries' in fresh_song_data and fresh_song_data['entries']:
+                                fresh_song_data = fresh_song_data['entries'][0]
+                            if fresh_song_data.get('url'):
+                                music_url = fresh_song_data['url']
+                            else:
+                                music_url = music_source_info['url']
+                        else:
+                            music_url = music_source_info['url']
+                    else:
+                        music_url = music_source_info['url']
+                except Exception as e:
+                    logger.warning(f"Failed to get fresh streaming URL for mixing, using existing: {e}")
+                    music_url = music_source_info['url']
+            else:
+                music_url = music_source_info['url']
+            
+            mixed_source = _create_mixed_audio_source(
+                music_url,
+                tmp_path,
+                music_volume=0.5
+            )
+            if mixed_source:
+                def mixed_after_play(error):
+                    if mixed_source:
+                        mixed_source.cleanup()
+                    after_play(error)
+                    if was_playing and current_song:
+                        async def resume_music():
+                            try:
+                                player = await YTDLSource.from_url(current_song.get('url'), stream=True)
+                                loop = music_bot.main_loop or asyncio.get_running_loop()
+                                voice_client.play(
+                                    player,
+                                    after=lambda e: loop.call_soon_threadsafe(asyncio.create_task, music_bot.play_next(guild_id)),
+                                )
+                            except Exception as e:
+                                logger.error(f"Failed to resume music after TTS: {e}")
+                        loop = music_bot.main_loop or asyncio.get_running_loop()
+                        loop.call_soon_threadsafe(asyncio.create_task, resume_music())
+                
+                voice_client.stop()
+                
+                await asyncio.sleep(0.3)
+                
+                try:
+                    logger.info(f"Playing mixed source (music + TTS) for guild {guild_id}, music_url: {music_url[:80]}...")
+                    voice_client.play(mixed_source, after=mixed_after_play)
+                    logger.info(f"Mixed source playback started, is_playing: {voice_client.is_playing()}")
+                    return {'success': True, 'message': 'Speaking with music...'}
+                except Exception as e:
+                    logger.error(f"Failed to play mixed source: {e}")
+                    if mixed_source:
+                        mixed_source.cleanup()
+                    raise
+            logger.warning("Failed to create mixed audio source, falling back to pause/resume")
+
+        if was_playing:
+            voice_client.pause()
+        
+        player = discord.PCMVolumeTransformer(discord.FFmpegPCMAudio(tmp_path, options='-vn'), volume=1.0)
+        voice_client.play(player, after=after_play)
+        return {'success': True, 'message': 'Speaking...'}
+    except Exception as e:
+        logger.error(f"Error playing TTS: {e}")
+        if was_playing:
+            _restore_music_volume(guild_id, original_volume)
+            if voice_client.is_paused():
+                voice_client.resume()
+        return {'success': False, 'error': f'Failed to play TTS: {str(e)}'}
 
 
 async def speak_piper_tts(guild_id: int, channel_id: int, text: str) -> Dict[str, Any]:
     if 'piper' not in tts_providers or not tts_providers['piper']:
         return {'success': False, 'error': 'Piper TTS not configured'}
 
-    voice_client = await music_bot.join_voice_channel(guild_id, channel_id)
+    resolved_channel_id, error = await _resolve_voice_channel(guild_id, channel_id)
+    if error:
+        return {'success': False, 'error': error}
+    
+    voice_client = await music_bot.join_voice_channel(guild_id, resolved_channel_id)
     if not voice_client:
         return {'success': False, 'error': 'Failed to join voice channel'}
 
-    was_playing = voice_client.is_playing()
+    music_source_info = music_bot.get_current_music_source(guild_id)
+    was_playing = music_source_info is not None
+    original_volume = None
+    use_mixing = False
+
     if was_playing:
-        voice_client.pause()
+        original_volume = _reduce_music_volume_for_tts(guild_id)
+        if original_volume is not None and music_source_info and music_source_info.get('url'):
+            use_mixing = True
 
     try:
         piper_tts = tts_providers['piper']
@@ -827,25 +1121,81 @@ async def speak_piper_tts(guild_id: int, channel_id: int, text: str) -> Dict[str
 
         loop = music_bot.main_loop or asyncio.get_running_loop()
 
-        def after_play(error):
-            async def cleanup():
-                await asyncio.sleep(PIPER_CLEANUP_DELAY)
-                try:
-                    os.remove(audio_path)
-                except OSError:
-                    pass
-                if was_playing and voice_client.is_paused():
-                    voice_client.resume()
-            loop.call_soon_threadsafe(asyncio.create_task, cleanup())
+        async def cleanup_tts():
+            await asyncio.sleep(PIPER_CLEANUP_DELAY)
+            try:
+                os.remove(audio_path)
+            except OSError:
+                pass
+            if was_playing:
+                _restore_music_volume(guild_id, original_volume)
 
+        def after_play(error):
+            loop.call_soon_threadsafe(asyncio.create_task, cleanup_tts())
+
+        if use_mixing and music_source_info:
+            current_song = music_bot.current_songs.get(guild_id)
+            if current_song:
+                try:
+                    loop = asyncio.get_running_loop()
+                    fresh_song_data = await loop.run_in_executor(None, lambda: ytdl.extract_info(current_song.get('url') or current_song.get('webpage_url', ''), download=False))
+                    if fresh_song_data:
+                        if 'entries' in fresh_song_data and fresh_song_data['entries']:
+                            fresh_song_data = fresh_song_data['entries'][0]
+                        if fresh_song_data.get('url'):
+                            music_url = fresh_song_data['url']
+                        else:
+                            music_url = music_source_info['url']
+                    else:
+                        music_url = music_source_info['url']
+                except Exception as e:
+                    logger.warning(f"Failed to get fresh streaming URL for mixing, using existing: {e}")
+                    music_url = music_source_info['url']
+            else:
+                music_url = music_source_info['url']
+            
+            mixed_source = _create_mixed_audio_source(
+                music_url,
+                audio_path,
+                music_volume=0.2
+            )
+            if mixed_source:
+                def mixed_after_play(error):
+                    if mixed_source:
+                        mixed_source.cleanup()
+                    after_play(error)
+                    if was_playing and current_song:
+                        async def resume_music():
+                            try:
+                                player = await YTDLSource.from_url(current_song.get('url'), stream=True)
+                                loop = music_bot.main_loop or asyncio.get_running_loop()
+                                voice_client.play(
+                                    player,
+                                    after=lambda e: loop.call_soon_threadsafe(asyncio.create_task, music_bot.play_next(guild_id)),
+                                )
+                            except Exception as e:
+                                logger.error(f"Failed to resume music after TTS: {e}")
+                        loop = music_bot.main_loop or asyncio.get_running_loop()
+                        loop.call_soon_threadsafe(asyncio.create_task, resume_music())
+                
+                voice_client.stop()
+                await asyncio.sleep(0.3)
+                voice_client.play(mixed_source, after=mixed_after_play)
+                return {'success': True, 'message': 'Speaking with Piper and music...'}
+            logger.warning("Failed to create mixed audio source, falling back to pause/resume")
+
+        if was_playing:
+            voice_client.pause()
+        
         player = discord.FFmpegPCMAudio(audio_path, options='-vn')
         voice_client.play(player, after=after_play)
         return {'success': True, 'message': 'Speaking with Piper...'}
-
     except Exception as e:
         logger.error(f"Piper TTS error: {e}")
-        if was_playing and voice_client.is_paused():
-            voice_client.resume()
+        if was_playing:
+            _restore_music_volume(guild_id, original_volume)
+            if voice_client.is_paused():
+                voice_client.resume()
         return {'success': False, 'error': str(e)}
 
 
@@ -875,7 +1225,6 @@ def should_respond_with_chatbot(message) -> bool:
         'tangerina' in content,
         bool(bot.user) and bot.user.mentioned_in(message),
         message.guild is None,
-        any(word in content for word in ['toca', 'play', 'música', 'musica', 'tocar', 'reproduzir', 'spotify', 'youtube', 'para', 'stop', 'pula', 'skip', 'pausa', 'pause', 'continua', 'resume', 'volume', 'fila', 'queue', 'entra', 'sai', 'leave', 'fala', 'speak', 'tts', 'conversa', 'chat'])
     ]
 
     return any(checks)
@@ -922,8 +1271,9 @@ async def on_message(message):
                     app_functions=app_functions
                 )
             
-            if hasattr(message.channel, 'typing'):
-                async with message.channel.typing():
+            typing_ctx = message.channel.typing() if hasattr(message.channel, 'typing') else None
+            if typing_ctx:
+                async with typing_ctx:
                     response, tool_calls = await generate_response()
             else:
                 response, tool_calls = await generate_response()
@@ -937,8 +1287,9 @@ async def on_message(message):
             if N8N_WEBHOOK_URL:
                 await forward_to_n8n(message_data)
         elif N8N_WEBHOOK_URL:
-            if hasattr(message.channel, 'typing'):
-                async with message.channel.typing():
+            typing_ctx = message.channel.typing() if hasattr(message.channel, 'typing') else None
+            if typing_ctx:
+                async with typing_ctx:
                     await forward_to_n8n(message_data)
             else:
                 await forward_to_n8n(message_data)
@@ -1208,7 +1559,7 @@ def chatbot_message():
 
     context = data.get('context', [])
     try:
-        response = chatbot.generate_response(message, context)
+        response = run_async(chatbot.generate_response(message, context), timeout=30)
         return jsonify({'success': True, 'response': response}), 200
     except Exception as e:
         logger.error(f"Chatbot error: {e}")

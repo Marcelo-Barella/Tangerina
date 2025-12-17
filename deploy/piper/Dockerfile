@@ -25,7 +25,8 @@ RUN mkdir -p /app/models && \
     pip install --no-cache-dir flask
 
 COPY server.py /app/server.py
-RUN chmod +x /app/server.py
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/server.py /app/entrypoint.sh
 
 ENV PIPER_BIN=/usr/local/bin/piper
 ENV PIPER_MODEL_PATH=/app/models/pt_BR-faber-medium.onnx
@@ -36,5 +37,6 @@ EXPOSE 5001
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=40s \
     CMD curl -f http://localhost:5001/health || exit 1
 
+ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["python", "/app/server.py"]
 
