@@ -2,6 +2,8 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+ARG WHISPER_PROVIDER
+
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     curl \
@@ -10,6 +12,10 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 
 RUN pip install --no-cache-dir -r requirements.txt
+
+RUN if [ "$WHISPER_PROVIDER" = "openai" ]; then \
+    pip install --no-cache-dir openai-whisper; \
+fi
 
 COPY . .
 

@@ -211,7 +211,8 @@ Se `N8N_WEBHOOK_URL` estiver configurado, o bot também enviará dados de mensag
 - `SPOTIFY_CLIENT_SECRET` (opcional) - Client Secret do Spotify Developer App
 - `TTS_PROVIDER` (opcional) - Provedor TTS: 'elevenlabs' ou 'piper' (padrão: elevenlabs)
 - `ELEVEN_API_KEY` (opcional) - Chave da API ElevenLabs para TTS
-- `OPENAI_API_KEY` (opcional) - Chave da API OpenAI para transcrição de voz
+- `WHISPER_PROVIDER` (opcional) - Provedor de transcrição de voz: 'zhipu' (GLM-ASR-2512) ou 'openai' (Whisper local) (padrão: zhipu)
+- `OPENAI_API_KEY` (opcional) - Chave da API OpenAI para transcrição de voz (não necessário para Whisper local)
 
 ## Solução de Problemas
 
@@ -659,15 +660,25 @@ Todos os comandos de música funcionam por voz:
 #### Requisitos
 
 - Bot deve estar no mesmo canal de voz
-- OpenAI API Key configurada (para transcrição de voz)
+- Provedor de transcrição configurado (GLM-ASR-2512 via ZHIPU_API_KEY ou Whisper local)
 - Microfone funcionando e sem ruído excessivo
 
 #### Variáveis de Ambiente
 
-- `OPENAI_API_KEY` (opcional) - Chave da API OpenAI para Whisper (transcrição de voz)
-- `ZHIPU_API_KEY` (opcional) - Chave da API ZhipuAI GLM para chatbot
+- `WHISPER_PROVIDER` (opcional) - Provedor de transcrição: 'zhipu' (GLM-ASR-2512) ou 'openai' (Whisper local) (padrão: zhipu)
+- `ZHIPU_API_KEY` (opcional) - Chave da API ZhipuAI GLM para chatbot e transcrição (necessário se WHISPER_PROVIDER=zhipu)
 - `TTS_PROVIDER` (opcional) - Provedor TTS: 'elevenlabs' ou 'piper' (padrão: elevenlabs)
 - `ELEVEN_API_KEY` (opcional) - Chave da API ElevenLabs para TTS
+
+#### Docker Build com Whisper
+
+Para usar Whisper local no Docker, construa a imagem com o build arg:
+
+```bash
+docker build --build-arg WHISPER_PROVIDER=openai -t tangerina .
+```
+
+Se não especificar o build arg, o comportamento padrão (GLM-ASR-2512) será mantido.
 
 #### Notas
 

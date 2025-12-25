@@ -18,3 +18,5 @@ __pycache__/
 .cache
 
 **/piper/models
+
+**/whisper/cache/**

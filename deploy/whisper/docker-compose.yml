@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  whisper-asr:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: whisper-asr
+    restart: unless-stopped
+    environment:
+      - WHISPER_MODEL=${WHISPER_MODEL:-base}
+      - WHISPER_LANGUAGE=${WHISPER_LANGUAGE:-pt}
+      - WHISPER_PORT=5002
+      - XDG_CACHE_HOME=/app/.cache
+    ports:
+      - "5002:5002"
+    volumes:
+      - ./cache:/app/.cache
+    networks:
+      - tangerina-network
+    mem_limit: 3g
+    mem_reservation: 2g
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  tangerina-network:
+    external: true
+
+

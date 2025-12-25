@@ -1,6 +1,7 @@
 import logging
 import json
 import re
+import asyncio
 from typing import Optional, Dict, Any, Tuple, List
 from zhipuai import ZhipuAI
 
@@ -298,9 +299,6 @@ class ZhipuChatbot:
             }
         return mapping
 
-    def _get_tools_schema(self) -> List[Dict[str, Any]]:
-        return self._tools_schema
-
     def _get_required_params(self, tool_name: str) -> List[str]:
         return self._tool_mapping.get(tool_name, {}).get("required", [])
 
@@ -336,15 +334,10 @@ class ZhipuChatbot:
         
         if "guild_id" in required and "guild_id" not in parameters and guild_id is not None:
             parameters["guild_id"] = guild_id
-            logger.info(f"Auto-filled guild_id={guild_id} for {tool_name}")
-        
         if "channel_id" in required and "channel_id" not in parameters and channel_id is not None:
             parameters["channel_id"] = channel_id
-            logger.info(f"Auto-filled channel_id={channel_id} for {tool_name}")
-        
         if "user_id" in required and "user_id" not in parameters and user_id is not None:
             parameters["user_id"] = user_id
-            logger.info(f"Auto-filled user_id={user_id} for {tool_name}")
         
         is_valid, error_msg = self._validate_parameters(tool_name, parameters)
         if not is_valid:
@@ -474,10 +467,58 @@ class ZhipuChatbot:
                     return content.strip()
         return ""
 
+    def _contains_tool_call_markers(self, text: str) -> bool:
+        tool_call_indicators = ["</tool_call>", "<arg_key>", "<arg_value>", "<tool_call>"]
+        text_lower = text.lower()
+        return any(indicator in text_lower for indicator in tool_call_indicators)
+
+    def _parse_xml_args(self, args_content: str) -> Dict[str, Any]:
+        arg_key_pattern = r"<arg_key>(.*?)</arg_key>"
+        arg_value_pattern = r"<arg_value>(.*?)</arg_value>"
+        keys = re.findall(arg_key_pattern, args_content, re.DOTALL)
+        values = re.findall(arg_value_pattern, args_content, re.DOTALL)
+        
+        if len(keys) != len(values):
+            return {}
+        
+        params = {}
+        for key, value in zip(keys, values):
+            key = key.strip()
+            value = value.strip()
+            if value.isdigit():
+                params[key] = int(value)
+            elif value.replace('.', '', 1).replace('-', '', 1).isdigit():
+                try:
+                    params[key] = float(value)
+                except ValueError:
+                    params[key] = value
+            else:
+                params[key] = value
+        return params
+
     def _parse_tool_call_from_text(self, text: str) -> Optional[Tuple[str, Dict[str, Any]]]:
         text = text.strip()
-        
         tool_names = [tool["function"]["name"] for tool in self._tools_schema]
+        
+        xml_pattern_with_name = r"<tool_call>(\w+)(.*?)</tool_call>"
+        xml_match = re.search(xml_pattern_with_name, text, re.DOTALL | re.MULTILINE)
+        if xml_match:
+            tool_name = xml_match.group(1)
+            if tool_name in tool_names:
+                params = self._parse_xml_args(xml_match.group(2))
+                if params:
+                    logger.info(f"Parsed XML tool call from text: {tool_name} with params: {params}")
+                    return tool_name, params
+        
+        xml_pattern_no_opening = r"^(\w+)\s*\n\s*(.*?)</tool_call>"
+        xml_match_no_opening = re.search(xml_pattern_no_opening, text, re.DOTALL | re.MULTILINE)
+        if xml_match_no_opening:
+            tool_name = xml_match_no_opening.group(1).strip()
+            if tool_name in tool_names:
+                params = self._parse_xml_args(xml_match_no_opening.group(2))
+                if params:
+                    logger.info(f"Parsed XML tool call from text (no opening tag): {tool_name} with params: {params}")
+                    return tool_name, params
         
         for tool_name in tool_names:
             patterns = [
@@ -486,21 +527,125 @@ class ZhipuChatbot:
                 rf"^{re.escape(tool_name)}\s*:\s*(\{{.*?\}})",
                 rf"^{re.escape(tool_name)}\s*(\{{.*?\}})",
             ]
-            
             for pattern in patterns:
                 match = re.search(pattern, text, re.DOTALL | re.MULTILINE)
                 if match:
                     try:
-                        params_json = match.group(1).strip()
-                        params = json.loads(params_json)
+                        params = json.loads(match.group(1).strip())
                         if isinstance(params, dict):
                             logger.info(f"Parsed tool call from text: {tool_name} with params: {params}")
                             return tool_name, params
-                    except (json.JSONDecodeError, Exception) as e:
-                        logger.debug(f"Failed to parse tool call parameters for {tool_name} with pattern {pattern}: {e}")
+                    except (json.JSONDecodeError, Exception):
                         continue
         
         return None
+
+    def _get_models_to_try(self) -> List[str]:
+        return [self.model] + [m for m in self._fallback_models if m != self.model]
+
+    def _make_sync_api_request(self, model_name: str, messages: List[Dict], 
+                               max_tokens: int, tools: Optional[List]) -> Any:
+        return self.client.chat.completions.create(
+            model=model_name,
+            messages=messages,
+            temperature=0.7,
+            top_p=0.9,
+            max_tokens=max_tokens,
+            tools=tools
+        )
+
+    async def _make_api_request(self, messages: List[Dict], max_tokens: int = 1000, tools: Optional[List] = None):
+        models_to_try = self._get_models_to_try()
+        last_error = None
+        
+        for model_name in models_to_try:
+            try:
+                response = await asyncio.to_thread(
+                    self._make_sync_api_request,
+                    model_name,
+                    messages,
+                    max_tokens,
+                    tools
+                )
+                if model_name != self.model:
+                    logger.info(f"Using fallback model {model_name} instead of {self.model}")
+                return response
+            except Exception as api_error:
+                last_error = api_error
+                continue
+        
+        raise last_error if last_error else Exception("All model names failed")
+
+    def _extract_tool_calls(self, choice) -> List[Any]:
+        if hasattr(choice, "message") and hasattr(choice.message, "tool_calls"):
+            return choice.message.tool_calls or []
+        return []
+
+    def _extract_choice_content(self, choice) -> str:
+        if hasattr(choice, "message") and hasattr(choice.message, "content"):
+            content = choice.message.content
+            return str(content) if content else ""
+        return ""
+
+    def _parse_tool_call(self, tool_call) -> Optional[Tuple[str, Dict[str, Any]]]:
+        if hasattr(tool_call, "function"):
+            function_info = tool_call.function
+            tool_name = function_info.name if hasattr(function_info, "name") else None
+            tool_params_str = function_info.arguments if hasattr(function_info, "arguments") else "{}"
+        elif isinstance(tool_call, dict):
+            function_info = tool_call.get("function", {})
+            tool_name = function_info.get("name") if isinstance(function_info, dict) else None
+            tool_params_str = function_info.get("arguments", "{}") if isinstance(function_info, dict) else "{}"
+        else:
+            return None
+        
+        if not tool_name:
+            return None
+        
+        try:
+            tool_params = json.loads(tool_params_str) if isinstance(tool_params_str, str) else tool_params_str
+            return tool_name, tool_params if isinstance(tool_params, dict) else {}
+        except (json.JSONDecodeError, Exception) as e:
+            logger.warning(f"Failed to parse tool parameters for {tool_name}: {e}")
+            return None
+
+    async def _handle_tool_call_from_text(self, content: str, app_functions: Dict[str, Any],
+                                         guild_id: Optional[int], channel_id: Optional[int],
+                                         user_id: Optional[int], tool_calls_executed: List[Dict],
+                                         sent_message_texts: List[str]) -> Optional[Tuple[str, bool]]:
+        parsed_tool = self._parse_tool_call_from_text(content)
+        if not parsed_tool:
+            return None
+        
+        tool_name, tool_params = parsed_tool
+        logger.info(f"Detected tool call in text response: {tool_name} with params: {tool_params}")
+        
+        tool_result = await self._call_tool(tool_name, tool_params, app_functions or {},
+                                           guild_id, channel_id, user_id)
+        tool_calls_executed.append({
+            "tool": tool_name,
+            "parameters": tool_params,
+            "result": tool_result
+        })
+        
+        send_mensagem_executed = False
+        if tool_name == "SEND_Mensagem" and tool_result.get("success"):
+            send_mensagem_executed = True
+            sent_text = str(tool_params.get("text", ""))
+            if sent_text:
+                sent_message_texts.append(sent_text.strip())
+        
+        if tool_result.get("success"):
+            if tool_name == "EnterChannel":
+                channel_name = tool_result.get("channel_name", "canal")
+                return f"Entrei no canal {channel_name}!", send_mensagem_executed
+            elif tool_name == "SEND_Mensagem":
+                return "", send_mensagem_executed
+            else:
+                return "Ação executada com sucesso!", send_mensagem_executed
+        else:
+            error_msg = tool_result.get("error", "Erro desconhecido")
+            return f"Erro ao executar ação: {error_msg}", send_mensagem_executed
 
     async def generate_response_with_tools(self, message: str, context: Optional[List[Dict]] = None,
                                           guild_id: Optional[int] = None, channel_id: Optional[int] = None,
@@ -512,67 +657,33 @@ class ZhipuChatbot:
         messages = self._build_messages(message, context, guild_id, channel_id, user_id)
         tool_calls_executed = []
         max_iterations = 5
+        send_mensagem_executed = False
+        sent_message_texts = []
 
         for iteration in range(max_iterations):
             try:
-                models_to_try = [self.model] + [m for m in self._fallback_models if m != self.model]
-                response = None
-                last_error = None
-                for model_name in models_to_try:
-                    try:
-                        response = self.client.chat.completions.create(
-                            model=model_name,
-                            messages=messages,
-                            temperature=0.7,
-                            top_p=0.9,
-                            max_tokens=1000,
-                            tools=self._tools_schema if iteration == 0 else None
-                        )
-                        if model_name != self.model:
-                            logger.info(f"Using fallback model {model_name} instead of {self.model}")
-                        break
-                    except Exception as api_error:
-                        last_error = api_error
-                        continue
-                
-                if response is None:
-                    raise last_error if last_error else Exception("All model names failed")
+                response = await self._make_api_request(
+                    messages,
+                    max_tokens=1000,
+                    tools=self._tools_schema if iteration == 0 else None
+                )
 
                 choices = response.choices if hasattr(response, "choices") else []
                 if not choices:
                     break
                 
                 choice = choices[0]
-                finish_reason = choice.finish_reason if hasattr(choice, "finish_reason") else getattr(choice, "finish_reason", None)
-                content = choice.message.content if hasattr(choice, "message") and hasattr(choice.message, "content") else (choice.get("content", "") if isinstance(choice, dict) else "")
-                tool_calls = choice.message.tool_calls if hasattr(choice, "message") and hasattr(choice.message, "tool_calls") else (choice.get("tool_calls", []) if isinstance(choice, dict) else [])
+                finish_reason = getattr(choice, "finish_reason", None)
+                content = self._extract_choice_content(choice)
+                tool_calls = self._extract_tool_calls(choice)
 
                 if tool_calls:
                     for tool_call in tool_calls:
-                        if hasattr(tool_call, "function"):
-                            function_info = tool_call.function
-                            tool_name = function_info.name if hasattr(function_info, "name") else None
-                            tool_params_str = function_info.arguments if hasattr(function_info, "arguments") else "{}"
-                        elif isinstance(tool_call, dict):
-                            function_info = tool_call.get("function", {})
-                            tool_name = function_info.get("name") if isinstance(function_info, dict) else None
-                            tool_params_str = function_info.get("arguments", "{}") if isinstance(function_info, dict) else "{}"
-                        else:
-                            logger.warning(f"Invalid tool_call format: {tool_call}")
+                        parsed = self._parse_tool_call(tool_call)
+                        if not parsed:
                             continue
                         
-                        if not tool_name:
-                            logger.warning(f"Tool call missing name: {tool_call}")
-                            continue
-                        
-                        try:
-                            tool_params = json.loads(tool_params_str) if isinstance(tool_params_str, str) else tool_params_str
-                            if not isinstance(tool_params, dict):
-                                tool_params = {}
-                        except (json.JSONDecodeError, Exception) as e:
-                            logger.warning(f"Failed to parse tool parameters for {tool_name}: {e}")
-                            tool_params = {}
-                        
+                        tool_name, tool_params = parsed
                         tool_result = await self._call_tool(tool_name, tool_params, app_functions or {},
                                                            guild_id, channel_id, user_id)
                         tool_calls_executed.append({
@@ -581,12 +692,18 @@ class ZhipuChatbot:
                             "result": tool_result
                         })
                         
+                        if tool_name == "SEND_Mensagem" and tool_result.get("success"):
+                            send_mensagem_executed = True
+                            sent_text = str(tool_params.get("text", ""))
+                            if sent_text:
+                                sent_message_texts.append(sent_text.strip())
+                        
                         tool_call_dict = {
                             "id": tool_call.id if hasattr(tool_call, "id") else None,
                             "type": "function",
                             "function": {
                                 "name": tool_name,
-                                "arguments": tool_params_str
+                                "arguments": json.dumps(tool_params) if isinstance(tool_params, dict) else str(tool_params)
                             }
                         }
                         messages.append({
@@ -604,59 +721,47 @@ class ZhipuChatbot:
                 
                 if finish_reason == "stop" or (not tool_calls and content):
                     if isinstance(content, str) and content.strip():
-                        parsed_tool = self._parse_tool_call_from_text(content)
-                        if parsed_tool:
-                            tool_name, tool_params = parsed_tool
-                            logger.info(f"Detected tool call in text response: {tool_name} with params: {tool_params}")
-                            tool_result = await self._call_tool(tool_name, tool_params, app_functions or {},
-                                                               guild_id, channel_id, user_id)
-                            tool_calls_executed.append({
-                                "tool": tool_name,
-                                "parameters": tool_params,
-                                "result": tool_result
-                            })
-                            
-                            if tool_result.get("success"):
-                                if tool_name == "EnterChannel":
-                                    channel_name = tool_result.get("channel_name", "canal")
-                                    return f"Entrei no canal {channel_name}!", tool_calls_executed
-                                elif tool_name == "SEND_Mensagem":
-                                    return "Mensagem enviada!", tool_calls_executed
-                                else:
-                                    return "Ação executada com sucesso!", tool_calls_executed
-                            else:
-                                error_msg = tool_result.get("error", "Erro desconhecido")
-                                return f"Erro ao executar ação: {error_msg}", tool_calls_executed
+                        result = await self._handle_tool_call_from_text(
+                            content, app_functions or {}, guild_id, channel_id, user_id,
+                            tool_calls_executed, sent_message_texts
+                        )
+                        if result:
+                            response_text, msg_executed = result
+                            if msg_executed:
+                                send_mensagem_executed = True
+                            return response_text, tool_calls_executed
                         
-                        return content.strip(), tool_calls_executed
+                        content_stripped = content.strip()
+                        if self._contains_tool_call_markers(content_stripped):
+                            logger.warning(f"Content contains tool call markers but parsing failed, filtering out: {content_stripped[:200]}")
+                            if send_mensagem_executed:
+                                return "", tool_calls_executed
+                            return "Ação executada.", tool_calls_executed
+                        if send_mensagem_executed and content_stripped in sent_message_texts:
+                            return "", tool_calls_executed
+                        return content_stripped, tool_calls_executed
                     break
                 
                 if content:
-                    parsed_tool = self._parse_tool_call_from_text(str(content))
-                    if parsed_tool:
-                        tool_name, tool_params = parsed_tool
-                        logger.info(f"Detected tool call in text response: {tool_name} with params: {tool_params}")
-                        tool_result = await self._call_tool(tool_name, tool_params, app_functions or {},
-                                                           guild_id, channel_id, user_id)
-                        tool_calls_executed.append({
-                            "tool": tool_name,
-                            "parameters": tool_params,
-                            "result": tool_result
-                        })
-                        
-                        if tool_result.get("success"):
-                            if tool_name == "EnterChannel":
-                                channel_name = tool_result.get("channel_name", "canal")
-                                return f"Entrei no canal {channel_name}!", tool_calls_executed
-                            elif tool_name == "SEND_Mensagem":
-                                return "Mensagem enviada!", tool_calls_executed
-                            else:
-                                return "Ação executada com sucesso!", tool_calls_executed
-                        else:
-                            error_msg = tool_result.get("error", "Erro desconhecido")
-                            return f"Erro ao executar ação: {error_msg}", tool_calls_executed
+                    result = await self._handle_tool_call_from_text(
+                        content, app_functions or {}, guild_id, channel_id, user_id,
+                        tool_calls_executed, sent_message_texts
+                    )
+                    if result:
+                        response_text, msg_executed = result
+                        if msg_executed:
+                            send_mensagem_executed = True
+                        return response_text, tool_calls_executed
                     
-                    return str(content).strip(), tool_calls_executed
+                    content_stripped = str(content).strip()
+                    if self._contains_tool_call_markers(content_stripped):
+                        logger.warning(f"Content contains tool call markers but parsing failed, filtering out: {content_stripped[:200]}")
+                        if send_mensagem_executed:
+                            return "", tool_calls_executed
+                        return "Ação executada.", tool_calls_executed
+                    if send_mensagem_executed and content_stripped in sent_message_texts:
+                        return "", tool_calls_executed
+                    return content_stripped, tool_calls_executed
                 
                 break
                 
@@ -672,29 +777,8 @@ class ZhipuChatbot:
 
         messages = self._build_messages(message, context)
 
-        models_to_try = [self.model] + [m for m in self._fallback_models if m != self.model]
-        response = None
-        last_error = None
-        for model_name in models_to_try:
-            try:
-                response = self.client.chat.completions.create(
-                    model=model_name,
-                    messages=messages,
-                    temperature=0.7,
-                    top_p=0.9,
-                    max_tokens=600,
-                )
-                if model_name != self.model:
-                    logger.info(f"Using fallback model {model_name} instead of {self.model}")
-                break
-            except Exception as api_error:
-                last_error = api_error
-                continue
-        
-        if response is None:
-            raise last_error if last_error else Exception("All model names failed")
-        
         try:
+            response = await self._make_api_request(messages, max_tokens=600)
             content = self._extract_content(response)
             if content:
                 return content
