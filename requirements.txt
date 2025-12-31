@@ -10,3 +10,4 @@ discord-ext-voice-recv>=0.5.1a170
 openai>=1.0.0
 spotipy>=2.23.0
 zhipuai>=2.0.0
+google-genai>=0.2.0

@@ -1,8 +1,8 @@
 import asyncio
 import logging
 from flask import Flask, request, jsonify
-from music_service import MusicService
-from music_bot import MusicBot
+from features.music.music_service import MusicService
+from features.music.music_bot import MusicBot
 
 logger = logging.getLogger(__name__)
 

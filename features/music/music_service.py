@@ -2,7 +2,7 @@ import re
 import logging
 import discord
 from typing import Optional, Dict, Any, Tuple
-from music_bot import MusicBot, YTDLSource, FFMPEG_OPTIONS
+from features.music.music_bot import MusicBot, YTDLSource, FFMPEG_OPTIONS
 
 logger = logging.getLogger(__name__)
 

@@ -132,7 +132,7 @@ class MusicBot:
             vc = await channel.connect(cls=voice_recv_module.VoiceRecvClient)
             self.voice_clients[guild_id] = vc
             if guild_id not in self.voice_sinks:
-                from voice_commands import VoiceCommandSink
+                from features.voice.voice_commands import VoiceCommandSink
                 sink = VoiceCommandSink(
                     self.bot, vc, guild_id,
                     getattr(self, 'zhipu_api_key', ''),
