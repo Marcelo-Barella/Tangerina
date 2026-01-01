@@ -1,6 +1,6 @@
 # Tangerina Discord Bot
 
-Sistema de bot do Discord inteligente que utiliza GLM-4 (ZhipuAI) como motor de processamento principal, com capacidades de chamada de funções para controle de música, voz e interações Discord.
+Sistema de bot do Discord inteligente com suporte a múltiplos provedores de IA (ZhipuAI GLM, OpenAI GPT, Google Gemini), com capacidades de chamada de funções para controle de música, voz e interações Discord.
 
 ## Requisitos
 
@@ -46,15 +46,18 @@ pip install -r requirements.txt
 
 ## Configuração
 
-1. Copie o arquivo `.env.example` para `.env`:
-```bash
-cp .env.example .env
-```
+1. Crie um arquivo `.env` na raiz do projeto e configure as seguintes variáveis:
 
-2. Edite o arquivo `.env` e configure:
-
+**Variáveis Obrigatórias:**
 - `DISCORD_BOT_TOKEN`: Token do bot do Discord (obrigatório)
-- `ZHIPU_API_KEY`: Chave da API ZhipuAI GLM (obrigatório para funcionalidades inteligentes)
+
+**Variáveis de Configuração do Chatbot:**
+- `MODEL_PROVIDER`: Provedor de IA a ser usado - 'zhipu' (padrão), 'openai' ou 'gemini'
+- `ZHIPU_API_KEY`: Chave da API ZhipuAI GLM (obrigatório se MODEL_PROVIDER=zhipu)
+- `OPENAI_API_KEY`: Chave da API OpenAI (obrigatório se MODEL_PROVIDER=openai, também usado para Whisper se WHISPER_PROVIDER=openai)
+- `GEMINI_API_KEY`: Chave da API Google Gemini (obrigatório se MODEL_PROVIDER=gemini)
+
+**Variáveis Opcionais:**
 - `N8N_WEBHOOK_URL`: URL do webhook do n8n (opcional - para integração com n8n se desejado)
 - `LOG_LEVEL`: Nível de log (opcional, padrão: INFO)
 
@@ -79,24 +82,65 @@ Para habilitar a integração com Spotify:
 
 **Nota**: A integração do Spotify usa Client Credentials Flow, que não requer redirect URI ou autenticação do usuário. Funciona perfeitamente para bots!
 
-## Configuração do Chatbot ZhipuAI GLM (Opcional)
+## Configuração do Chatbot (Opcional)
 
-Para habilitar o chatbot inteligente com persona Tangerina:
+O bot suporta múltiplos provedores de IA para o processamento inteligente. Configure o provedor desejado através da variável `MODEL_PROVIDER` no arquivo `.env`.
+
+### Provedor ZhipuAI GLM (Padrão)
+
+Para usar o ZhipuAI GLM como provedor:
 
 1. Acesse https://open.bigmodel.cn/ e crie uma conta
 2. Obtenha sua API Key
-3. Adicione ao arquivo `.env`:
+3. Configure no arquivo `.env`:
    ```
+   MODEL_PROVIDER=zhipu
    ZHIPU_API_KEY=sua_api_key_aqui
    ```
 
-**Funcionalidades do Chatbot:**
+**Modelos utilizados:** GLM-4 Plus (padrão), com fallback para GLM-4 Flash, GLM-3 Turbo e GLM-4
+
+### Provedor OpenAI GPT
+
+Para usar o OpenAI GPT como provedor:
+
+1. Acesse https://platform.openai.com/ e crie uma conta
+2. Obtenha sua API Key
+3. Configure no arquivo `.env`:
+   ```
+   MODEL_PROVIDER=openai
+   OPENAI_API_KEY=sua_api_key_aqui
+   ```
+
+**Modelos utilizados:** GPT-4o Mini
+
+### Provedor Google Gemini
+
+Para usar o Google Gemini como provedor:
+
+1. Acesse https://aistudio.google.com/ e crie uma conta
+2. Obtenha sua API Key
+3. Configure no arquivo `.env`:
+   ```
+   MODEL_PROVIDER=gemini
+   GEMINI_API_KEY=sua_api_key_aqui
+   ```
+
+**Modelos utilizados:** Gemini 2.5 Flash Lite (padrão), com fallback para Gemini 2.0 Flash Exp
+
+**Nota:** O suporte ao Gemini está funcional, mas pode ter limitações. Para produção, considere usar ZhipuAI ou OpenAI.
+
+### Funcionalidades do Chatbot
+
+Independente do provedor escolhido, o chatbot oferece:
 - Respostas inteligentes em português brasileiro
 - Integração com comandos de música e voz via chamada de funções
-- Persona personalizada da Tangerina
+- Persona personalizada da Tangerina (carregada de `tangerina_persona.txt`)
 - Contexto de conversa mantido
-- Processamento inteligente com GLM-4 e acesso a 15 ferramentas
+- Processamento inteligente com acesso a 15 ferramentas
 - Decisão automática de ações baseada no contexto
+
+**Importante:** As respostas do chatbot não são enviadas automaticamente via Discord. Elas são disponibilizadas através de chamadas de ferramentas (tool calls) ou podem ser acessadas via webhook n8n se configurado.
 
 ## Configuração do Piper TTS (Opcional)
 
@@ -137,15 +181,15 @@ python app.py
 
 2. O bot se conectará ao Discord e começará a escutar mensagens em todos os canais.
 
-3. O bot processa mensagens usando GLM-4 com chamada de funções, permitindo ações inteligentes como:
+3. O bot processa mensagens usando o provedor de IA configurado (via `MODEL_PROVIDER`) com chamada de funções, permitindo ações inteligentes como:
    - Controle de música (YouTube, Spotify)
    - Síntese de voz (TTS)
    - Gerenciamento de canais de voz
    - Respostas contextuais inteligentes
 
-## Funcionalidades GLM com Chamada de Funções
+## Funcionalidades de IA com Chamada de Funções
 
-O bot utiliza GLM-4 como motor de processamento principal, com acesso a 15 ferramentas:
+O bot utiliza o provedor de IA configurado (ZhipuAI GLM, OpenAI GPT ou Google Gemini) como motor de processamento principal, com acesso a 15 ferramentas:
 
 ### Ferramentas Disponíveis
 
@@ -163,9 +207,9 @@ O bot utiliza GLM-4 como motor de processamento principal, com acesso a 15 ferra
 12. **GET_MusicQueue** - Mostra fila de músicas
 13. **MusicSpotifyPlay** - Toca Spotify específico
 14. **MusicLeave** - Sai do canal e limpa recursos
-15. **TTSSpeak** - Síntese de voz via ElevenLabs
+15. **TTSSpeak** - Síntese de voz via ElevenLabs ou Piper
 
-O GLM decide automaticamente quais ferramentas usar baseado no contexto da mensagem do usuário.
+O modelo de IA decide automaticamente quais ferramentas usar baseado no contexto da mensagem do usuário.
 
 ## Integração com n8n (Opcional)
 
@@ -190,7 +234,7 @@ Se `N8N_WEBHOOK_URL` estiver configurado, o bot também enviará dados de mensag
   },
   "message_id": "444555666",
   "timestamp": "2025-01-15T10:30:00Z",
-  "chatbot_response": "Resposta do GLM",
+  "chatbot_response": "Resposta do modelo de IA",
   "tool_calls": [
     {
       "tool": "MusicPlay",
@@ -201,18 +245,28 @@ Se `N8N_WEBHOOK_URL` estiver configurado, o bot também enviará dados de mensag
 }
 ```
 
+**Nota sobre Respostas do Chatbot:**
+As respostas do chatbot não são enviadas automaticamente via Discord através da ferramenta `SEND_Mensagem`. Elas estão disponíveis no campo `chatbot_response` do payload enviado para o n8n e podem ser processadas através de tool calls. Para enviar respostas ao Discord via n8n, configure seu workflow para usar o campo `chatbot_response` ou processar as tool calls retornadas.
+
 ## Variáveis de Ambiente
 
-- `DISCORD_BOT_TOKEN` (obrigatório) - Token do bot do Discord
-- `ZHIPU_API_KEY` (obrigatório) - Chave da API ZhipuAI GLM para processamento inteligente
-- `N8N_WEBHOOK_URL` (opcional) - URL do webhook do n8n para integração adicional
-- `LOG_LEVEL` (opcional) - Nível de log (padrão: INFO)
-- `SPOTIFY_CLIENT_ID` (opcional) - Client ID do Spotify Developer App
-- `SPOTIFY_CLIENT_SECRET` (opcional) - Client Secret do Spotify Developer App
-- `TTS_PROVIDER` (opcional) - Provedor TTS: 'elevenlabs' ou 'piper' (padrão: elevenlabs)
-- `ELEVEN_API_KEY` (opcional) - Chave da API ElevenLabs para TTS
-- `WHISPER_PROVIDER` (opcional) - Provedor de transcrição de voz: 'zhipu' (GLM-ASR-2512) ou 'openai' (Whisper local) (padrão: zhipu)
-- `OPENAI_API_KEY` (opcional) - Chave da API OpenAI para transcrição de voz (não necessário para Whisper local)
+**Variáveis Obrigatórias:**
+- `DISCORD_BOT_TOKEN` - Token do bot do Discord
+
+**Variáveis de Configuração do Chatbot:**
+- `MODEL_PROVIDER` (opcional, padrão: 'zhipu') - Provedor de IA: 'zhipu', 'openai' ou 'gemini'
+- `ZHIPU_API_KEY` - Chave da API ZhipuAI GLM (obrigatório se MODEL_PROVIDER=zhipu)
+- `OPENAI_API_KEY` - Chave da API OpenAI (obrigatório se MODEL_PROVIDER=openai, também usado para Whisper se WHISPER_PROVIDER=openai)
+- `GEMINI_API_KEY` - Chave da API Google Gemini (obrigatório se MODEL_PROVIDER=gemini)
+
+**Variáveis Opcionais:**
+- `N8N_WEBHOOK_URL` - URL do webhook do n8n para integração adicional
+- `LOG_LEVEL` - Nível de log (padrão: INFO)
+- `SPOTIFY_CLIENT_ID` - Client ID do Spotify Developer App
+- `SPOTIFY_CLIENT_SECRET` - Client Secret do Spotify Developer App
+- `TTS_PROVIDER` - Provedor TTS: 'elevenlabs' ou 'piper' (padrão: elevenlabs)
+- `ELEVEN_API_KEY` - Chave da API ElevenLabs para TTS
+- `WHISPER_PROVIDER` - Provedor de transcrição de voz: 'zhipu' (GLM-ASR-2512) ou 'openai' (Whisper local) (padrão: zhipu)
 
 ## Solução de Problemas
 
@@ -224,7 +278,8 @@ Se `N8N_WEBHOOK_URL` estiver configurado, o bot também enviará dados de mensag
 
 ### Mensagens não são processadas
 
-- Verifique se `ZHIPU_API_KEY` está configurado corretamente
+- Verifique se a variável `MODEL_PROVIDER` está configurada corretamente
+- Verifique se a API key correspondente ao provedor está configurada (`ZHIPU_API_KEY`, `OPENAI_API_KEY` ou `GEMINI_API_KEY`)
 - Verifique os logs para erros
 - Verifique se o bot tem permissões para ler mensagens no canal
 - Se usando n8n, verifique se a URL do webhook está correta
@@ -312,6 +367,34 @@ http://localhost:5000
 {
   "success": true,
   "guild_id": 123456789012345678
+}
+```
+
+#### GET /user/voice-channel
+**Parâmetros de Query:**
+- `guild_id` (obrigatório): Inteiro - ID do servidor Discord
+- `user_id` (obrigatório): Inteiro - ID do usuário Discord
+
+**Exemplo de Requisição:**
+```
+GET /user/voice-channel?guild_id=123456789012345678&user_id=987654321098765432
+```
+
+**Resposta (Sucesso):**
+```json
+{
+  "success": true,
+  "user_id": 987654321098765432,
+  "channel_id": 111222333444555666,
+  "channel_name": "General"
+}
+```
+
+**Resposta (Usuário não encontrado):**
+```json
+{
+  "success": false,
+  "error": "User not found in any voice channel"
 }
 ```
 
@@ -640,6 +723,27 @@ O bot Tangerina agora pode escutar comandos de voz em canais de voz do Discord!
 3. Fale seu comando naturalmente em português
 4. O bot transcreverá sua fala e executará o comando
 
+#### Modo de Escuta (Listening Mode)
+
+O bot possui um modo de escuta especial ativado pela palavra-chave "tangerina":
+
+**Como Funciona:**
+1. Quando você diz "tangerina" em um canal de voz, o bot:
+   - Reduz o volume da música para 20% automaticamente
+   - Entra em modo de escuta por 5 segundos
+   - Aguarda comandos conversacionais ou interações com o chatbot
+
+2. Durante o modo de escuta, você pode:
+   - Fazer perguntas ao chatbot
+   - Dar comandos conversacionais
+   - Cancelar o modo de escuta usando palavras-chave: 'cancel', 'cancelar', 'stop', 'parar', 'nevermind', 'esquece'
+
+3. Após 5 segundos sem interação ou após processar o comando:
+   - O volume da música é restaurado automaticamente
+   - O modo de escuta é desativado
+
+**Nota:** O modo de escuta requer que haja música tocando e que o volume possa ser ajustado.
+
 #### Comandos de Voz Suportados
 
 Todos os comandos de música funcionam por voz:
@@ -654,8 +758,8 @@ Todos os comandos de música funcionam por voz:
 - "sai" ou "leave" → sair do canal de voz
 
 **Comandos de Chatbot:**
-- "tangerina [pergunta]" ou "fala [pergunta]" → conversar com o chatbot
-- "conversa [tópico]" ou "chat [tópico]" → iniciar conversa
+- "tangerina [pergunta]" → ativa modo de escuta e processa pergunta (em canal de voz)
+- Conversas normais em canais de texto quando o bot é mencionado
 
 #### Requisitos
 
@@ -686,3 +790,128 @@ Se não especificar o build arg, o comportamento padrão (GLM-ASR-2512) será ma
 - Comandos são transcritos e processados automaticamente
 - Respostas podem ser por texto ou por voz (TTS)
 - Múltiplos usuários podem usar comandos de voz simultaneamente
+
+## Arquivo de Persona
+
+O bot utiliza um arquivo de persona personalizado para definir o comportamento e personalidade da Tangerina:
+
+**Localização:**
+- Em execução local: `chatbot/tangerina_persona.txt`
+- Em Docker: montado como volume em `/app/tangerina_persona.txt`
+
+**Formato:**
+O arquivo deve conter texto em português brasileiro descrevendo a personalidade, estilo de comunicação e características da Tangerina.
+
+**Fallback:**
+Se o arquivo não for encontrado, o bot utilizará uma persona padrão embutida no código.
+
+**Importante:** Para usar o arquivo de persona no Docker, certifique-se de montar o volume corretamente no `docker-compose.yaml`.
+
+## Estrutura do Projeto
+
+O projeto está organizado em módulos para facilitar manutenção e extensão:
+
+```
+Tangerina/
+├── chatbot/              # Integrações com provedores de IA
+│   ├── zhipu_integration.py
+│   ├── openai_integration.py
+│   ├── gemini_integration.py
+│   └── model_helper.py
+├── features/             # Funcionalidades do bot
+│   ├── music/           # Controle de música (YouTube, Spotify)
+│   ├── tts/             # Síntese de voz (ElevenLabs, Piper)
+│   └── voice/           # Comandos de voz e transcrição
+├── deploy/              # Arquivos de deployment
+│   ├── docker-compose.yaml
+│   ├── Dockerfile
+│   ├── piper/          # Serviço Piper TTS
+│   └── whisper/        # Serviço Whisper (opcional)
+├── app.py              # Arquivo principal do bot
+├── flask_routes.py     # API REST
+└── requirements.txt    # Dependências Python
+```
+
+## Deploy com Docker
+
+O projeto inclui uma configuração completa do Docker Compose para facilitar o deployment:
+
+### Estrutura de Serviços
+
+O `docker-compose.yaml` define os seguintes serviços:
+
+1. **tangerina-bot** - Serviço principal do bot Discord
+   - Porta: 5000 (API REST)
+   - Volume: `tangerina_persona.txt` (persona do bot)
+   - Volume: `logs/` (logs da aplicação)
+   - Health check: `/health`
+
+2. **piper-tts** - Serviço de síntese de voz local (opcional)
+   - Porta: 5001
+   - Volume: modelos Piper TTS
+   - Health check: `/health`
+
+3. **n8n** - Serviço de automação (opcional, requer profile)
+   - Porta: 5678
+   - Acessível apenas quando o profile `n8n` for ativado
+
+### Pré-requisitos
+
+1. Docker e Docker Compose instalados
+2. Arquivo `.env` configurado na raiz do projeto
+3. Arquivo `tangerina_persona.txt` na raiz do projeto (será montado como volume)
+
+### Deploy
+
+1. Configure o arquivo `.env` com todas as variáveis necessárias
+2. Certifique-se de que o arquivo `tangerina_persona.txt` existe na raiz do projeto
+3. Execute o docker-compose:
+   ```bash
+   cd deploy
+   docker-compose up -d
+   ```
+
+### Iniciar com n8n (opcional)
+
+Para iniciar os serviços incluindo o n8n:
+```bash
+cd deploy
+docker-compose --profile n8n up -d
+```
+
+### Verificar Status
+
+Verifique o status dos serviços:
+```bash
+docker-compose ps
+```
+
+Verifique os logs:
+```bash
+docker-compose logs -f tangerina-bot
+```
+
+### Health Checks
+
+Os serviços incluem health checks automáticos:
+- Bot principal: `http://localhost:5000/health`
+- Piper TTS: `http://localhost:5001/health`
+
+### Variáveis de Ambiente no Docker
+
+Todas as variáveis de ambiente definidas no arquivo `.env` na raiz do projeto são automaticamente carregadas pelo Docker Compose. Certifique-se de configurar:
+- `MODEL_PROVIDER` e a respectiva API key
+- `DISCORD_BOT_TOKEN`
+- Outras variáveis conforme necessário
+
+### Volumes
+
+**Volumes Montados:**
+- `tangerina_persona.txt` - Arquivo de persona (read-only)
+- `logs/` - Diretório de logs (read-write)
+- `piper_models/` - Modelos Piper TTS (gerenciado pelo Docker)
+- `n8n_data/` - Dados do n8n (gerenciado pelo Docker)
+
+### Rede
+
+Todos os serviços estão conectados à rede `tangerina-network`, permitindo comunicação entre eles.
