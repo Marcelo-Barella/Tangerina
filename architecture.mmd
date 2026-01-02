@@ -1,0 +1,135 @@
+flowchart TD
+    Start([Start])
+    
+    %% Text Message Flow
+    TextMsg[Text Message Received]
+    TextMsg --> CheckBot{Is Bot?}
+    CheckBot -->|Yes| End1([End])
+    CheckBot -->|No| ProcessCmd[Process Commands]
+    
+    ProcessCmd --> ExtractMsg[Extract Message Data]
+    ExtractMsg --> CheckTangerina{Has 'Tangerina'<br/>or Mention<br/>or DM?}
+    CheckTangerina -->|No| ForwardN8N1{Forward to<br/>n8n?}
+    ForwardN8N1 -->|Yes| N8N1[n8n Webhook]
+    ForwardN8N1 -->|No| End1
+    CheckTangerina -->|Yes| ExtractContext[Extract Context<br/>guild_id, channel_id, user_id]
+    
+    %% Voice Command Flow
+    VoiceInput[Voice Audio Input]
+    VoiceInput --> AudioBuffer[Collect Audio Buffers]
+    AudioBuffer --> CheckChunks{Min Chunks<br/>Collected?}
+    CheckChunks -->|No| End2([End])
+    CheckChunks -->|Yes| CombineAudio[Combine Audio Chunks<br/>Convert to Mono WAV]
+    
+    CombineAudio --> Transcribe{Transcription<br/>Provider?}
+    Transcribe -->|GLM-ASR-2512| ZhipuTranscribe[Zhipu API<br/>GLM-ASR-2512]
+    Transcribe -->|Whisper| LocalTranscribe[Local Whisper<br/>Model Medium]
+    
+    ZhipuTranscribe --> TranscribedText[Transcribed Text]
+    LocalTranscribe --> TranscribedText
+    
+    TranscribedText --> CheckWakeWord{Has 'tangerina'<br/>wake word?}
+    CheckWakeWord -->|Yes| CheckListeningMode{In Listening<br/>Mode?}
+    CheckWakeWord -->|No| CheckListeningMode2{In Listening<br/>Mode?}
+    
+    CheckListeningMode -->|No| ActivateListening[Activate Listening Mode<br/>Lower Volume to 20%<br/>Set 5s Timeout]
+    ActivateListening --> End2
+    
+    CheckListeningMode -->|Yes| HandleListening[Handle Listening Mode<br/>Check Cancel Keywords]
+    CheckListeningMode2 -->|Yes| HandleListening
+    CheckListeningMode2 -->|No| VoiceCommand[Process Voice Command<br/>play, stop, skip, pause, etc.]
+    
+    HandleListening --> CancelCheck{Cancel<br/>Keywords?}
+    CancelCheck -->|Yes| DeactivateListening[Deactivate Listening Mode<br/>Restore Volume]
+    DeactivateListening --> End2
+    CancelCheck -->|No| ChatbotVoice[Chatbot Generate Response]
+    
+    VoiceCommand --> ExecuteVoiceCmd[Execute Voice Command<br/>Music Service]
+    ExecuteVoiceCmd --> VoiceResponse[Voice Response<br/>Text Channel]
+    VoiceResponse --> End2
+    
+    %% Common AI Processing
+    ExtractContext --> BuildContext[Build Context Object<br/>guild, channel, user]
+    ChatbotVoice --> BuildContext
+    
+    BuildContext --> BuildMessages[Build Messages<br/>System Prompt + Persona<br/>Context History<br/>Current Message]
+    
+    BuildMessages --> AICore{AI Core Processing}
+    
+    AICore --> SystemPrompt[System Prompt<br/>Tangerina Persona<br/>Rules & Instructions]
+    AICore --> ProviderSelect{Model Provider?}
+    ProviderSelect -->|Zhipu| ZhipuAI[ZhipuAI GLM-4<br/>Plus/Flash/Turbo]
+    ProviderSelect -->|OpenAI| OpenAIAI[OpenAI GPT-4o<br/>Mini]
+    ProviderSelect -->|Gemini| GeminiAI[Google Gemini<br/>2.5 Flash Lite]
+    
+    ZhipuAI --> APIRequest[API Request<br/>with Tools Schema]
+    OpenAIAI --> APIRequest
+    GeminiAI --> APIRequest
+    
+    APIRequest --> ToolCallCheck{Has Tool<br/>Calls?}
+    
+    ToolCallCheck -->|Yes| ExecuteTools[Execute Tool Calls<br/>15 Available Tools]
+    ExecuteTools --> ToolTypes{Tool Type?}
+    
+    ToolTypes -->|Music| MusicTools[Music Tools<br/>Play, Stop, Skip, Pause,<br/>Resume, Volume, Queue]
+    ToolTypes -->|Channel| ChannelTools[Channel Tools<br/>Enter, Leave, Get Channels,<br/>Get User Voice Channel]
+    ToolTypes -->|Message| MessageTool[SEND_Mensagem<br/>Send to Discord]
+    ToolTypes -->|TTS| TTSTool[TTSSpeak<br/>ElevenLabs/Piper]
+    
+    MusicTools --> MusicService[Music Service<br/>YouTube/Spotify]
+    ChannelTools --> VoiceClient[Discord Voice Client]
+    MessageTool --> DiscordSend[Send Message<br/>to Discord Channel]
+    TTSTool --> TTSService[TTS Service<br/>ElevenLabs/Piper]
+    
+    MusicService --> ToolResult[Tool Execution Result]
+    VoiceClient --> ToolResult
+    DiscordSend --> ToolResult
+    TTSTool --> ToolResult
+    
+    ToolResult --> AddToolResponse[Add Tool Response<br/>to Messages]
+    AddToolResponse --> APIRequest
+    
+    ToolCallCheck -->|No| ExtractResponse[Extract Response<br/>Text Content]
+    
+    ExtractResponse --> ResponseCheck{Response<br/>Type?}
+    ResponseCheck -->|Text| TextResponse[Text Response]
+    ResponseCheck -->|Tool Calls| ExecuteTools
+    
+    TextResponse --> StoreResponse[Store Response Data]
+    ExecuteTools --> StoreResponse
+    
+    StoreResponse --> ForwardN8N2{Forward to<br/>n8n?}
+    ForwardN8N2 -->|Yes| N8N2[n8n Webhook<br/>with Response & Tool Calls]
+    ForwardN8N2 -->|No| DiscordOutput
+    
+    %% Discord Output
+    StoreResponse --> DiscordOutput{Output<br/>Method?}
+    DiscordOutput -->|Tool Call SEND_Mensagem| DiscordText[Discord Text Channel]
+    DiscordOutput -->|Voice Command| VoiceResponse
+    DiscordOutput -->|Listening Mode| ChatbotVoiceResponse[Chatbot Response<br/>Text Channel + Optional TTS]
+    DiscordOutput -->|No Direct Output| N8NOnly[n8n Only]
+    
+    DiscordText --> End3([End])
+    VoiceResponse --> End3
+    ChatbotVoiceResponse --> End3
+    N8NOnly --> End3
+    N8N1 --> End1
+    N8N2 --> End3
+    
+    %% Memory/Loop (Future Implementation)
+    StoreResponse -.->|Future: Remember| BuildContext
+    
+    %% Styling
+    classDef startEnd fill:#e1f5ff,stroke:#01579b,stroke-width:2px
+    classDef process fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef decision fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef ai fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    classDef tool fill:#fff9c4,stroke:#f57f17,stroke-width:2px
+    classDef output fill:#fce4ec,stroke:#880e4f,stroke-width:2px
+    
+    class Start,End1,End2,End3 startEnd
+    class TextMsg,ExtractMsg,ExtractContext,BuildContext,BuildMessages,ExtractResponse,StoreResponse process
+    class CheckBot,CheckTangerina,CheckChunks,Transcribe,CheckWakeWord,CheckListeningMode,CheckListeningMode2,CancelCheck,ProviderSelect,ToolCallCheck,ToolTypes,ResponseCheck,ForwardN8N1,ForwardN8N2,DiscordOutput decision
+    class AICore,SystemPrompt,ZhipuAI,OpenAIAI,GeminiAI,APIRequest ai
+    class ExecuteTools,MusicTools,ChannelTools,MessageTool,TTSTool,MusicService,VoiceClient,TTSService,ToolResult,AddToolResponse tool
+    class DiscordSend,DiscordText,VoiceResponse,ChatbotVoiceResponse,N8N1,N8N2,N8NOnly output
