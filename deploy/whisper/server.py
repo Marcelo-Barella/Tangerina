@@ -22,7 +22,7 @@ def _load_model():
     global _model
     if _model is None:
         if whisper is None:
-            raise RuntimeError("openai-whisper package not available")
+            raise RuntimeError("whisper not available")
         _model = whisper.load_model(WHISPER_MODEL_NAME)
     return _model
 
@@ -36,18 +36,19 @@ def health():
 def transcribe():
     uploaded = request.files.get("file")
     if uploaded is None:
-        return jsonify({"error": "Missing 'file' upload (multipart/form-data)"}), 400
+        return jsonify({"error": "Missing 'file' upload"}), 400
 
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
         uploaded.save(tmp.name)
         tmp_path = tmp.name
 
     try:
-        model = _load_model()
-        result = model.transcribe(tmp_path, language=WHISPER_LANGUAGE)
-        text = result.get("text", "").strip()
-        return jsonify({"text": text}), 200
+        result = _load_model().transcribe(tmp_path, language=WHISPER_LANGUAGE)
+        text_response = result.get("text", "").strip()
+        logger.info(f"Transcribe response: {text_response}")
+        return jsonify({"text": text_response}), 200
     except Exception as exc:
+        logger.error(f"Error transcribing audio: {exc}")
         return jsonify({"error": str(exc)}), 500
     finally:
         os.unlink(tmp_path)
