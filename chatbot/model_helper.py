@@ -38,7 +38,7 @@ def build_tools_schema() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "GET_Canais",
-                "description": "Lista todos os canais do servidor Discord",
+                "description": "Lista todos os canais de voz do servidor Discord",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -320,11 +320,12 @@ logger = logging.getLogger(__name__)
 
 
 class BaseChatbot(ABC):
-    def __init__(self, api_key: str, bot_instance=None, music_bot_instance=None):
+    def __init__(self, api_key: str, bot_instance=None, music_bot_instance=None, memory_manager=None):
         self._initialize_client(api_key)
         self.persona_context = load_tangerina_persona()
         self.bot = bot_instance
         self.music_bot = music_bot_instance
+        self.memory_manager = memory_manager
         self._tools_schema = build_tools_schema()
         self._tool_mapping = build_tool_mapping(self._tools_schema)
 
@@ -389,6 +390,8 @@ class BaseChatbot(ABC):
             if param_name in required and param_name not in parameters and param_value is not None:
                 parameters[param_name] = param_value
         
+        logger.info(f"Tool call: {tool_name} with parameters: {json.dumps(parameters, ensure_ascii=False)}")
+        
         is_valid, error_msg = self._validate_parameters(tool_name, parameters)
         if not is_valid:
             return {"success": False, "error": error_msg}
@@ -434,7 +437,7 @@ class BaseChatbot(ABC):
         guild = self.bot.get_guild(guild_id) if self.bot else None
         if not guild:
             return {"success": False, "error": f"Guild {guild_id} not found"}
-        return {"success": True, "channels": [{"id": ch.id, "name": ch.name, "type": str(ch.type)} for ch in guild.channels]}
+        return {"success": True, "channels": [{"id": ch.id, "name": ch.name, "type": str(ch.type)} for ch in guild.voice_channels]}
 
     async def _handle_send_mensagem(self, parameters: Dict[str, Any], app_functions: Dict[str, Any]) -> Dict[str, Any]:
         if not self.bot:
@@ -455,7 +458,8 @@ class BaseChatbot(ABC):
 
     def _build_messages(self, message: str, context: Optional[List[Dict]] = None,
                        guild_id: Optional[int] = None, channel_id: Optional[int] = None,
-                       user_id: Optional[int] = None) -> List[Dict]:
+                       user_id: Optional[int] = None,
+                       retrieved_memories: Optional[List[Dict]] = None) -> List[Dict]:
         system_content = build_system_text(self.persona_context)
         
         context_info = []
@@ -469,6 +473,12 @@ class BaseChatbot(ABC):
         if context_info:
             system_content += "\n\nCONTEXTO ATUAL:\n" + "\n".join(context_info)
             system_content += "\n\nIMPORTANTE: Ao chamar ferramentas que requerem guild_id, channel_id ou user_id, use SEMPRE os valores do contexto atual acima. NUNCA use valores mockados ou de exemplo."
+        
+        if retrieved_memories:
+            memory_texts = [mem.get("content", "") for mem in retrieved_memories if mem.get("content")]
+            if memory_texts:
+                memories_section = "\n\nMEMÓRIAS RELEVANTES:\n" + "\n".join([f"- {mem}" for mem in memory_texts])
+                system_content += memories_section
         
         messages = [{"role": "system", "content": system_content}]
         messages.extend(normalize_context(context))
@@ -589,11 +599,12 @@ class BaseChatbot(ABC):
     async def generate_response_with_tools(self, message: str, context: Optional[List[Dict]] = None,
                                           guild_id: Optional[int] = None, channel_id: Optional[int] = None,
                                           user_id: Optional[int] = None,
-                                          app_functions: Optional[Dict[str, Any]] = None) -> Tuple[str, List[Dict[str, Any]]]:
+                                          app_functions: Optional[Dict[str, Any]] = None,
+                                          retrieved_memories: Optional[List[Dict]] = None) -> Tuple[str, List[Dict[str, Any]]]:
         if not isinstance(message, str) or not message.strip():
             return "Manda a pergunta de novo pra mim, por favor.", []
 
-        messages = self._build_messages(message, context, guild_id, channel_id, user_id)
+        messages = self._build_messages(message, context, guild_id, channel_id, user_id, retrieved_memories)
         tool_calls_executed = []
         send_mensagem_executed = False
         sent_message_texts = []

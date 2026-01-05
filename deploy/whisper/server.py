@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import tempfile
+import logging
 
 from flask import Flask, jsonify, request
 
@@ -10,6 +11,7 @@ except ImportError:
     whisper = None
 
 app = Flask(__name__)
+logger = logging.getLogger(__name__)
 
 WHISPER_MODEL_NAME = os.getenv("WHISPER_MODEL", "medium")
 WHISPER_LANGUAGE = os.getenv("WHISPER_LANGUAGE", "pt")
@@ -43,7 +45,8 @@ def transcribe():
         tmp_path = tmp.name
 
     try:
-        result = _load_model().transcribe(tmp_path, language=WHISPER_LANGUAGE)
+        language_param = WHISPER_LANGUAGE if WHISPER_LANGUAGE else None
+        result = _load_model().transcribe(tmp_path, language=language_param)
         text_response = result.get("text", "").strip()
         logger.info(f"Transcribe response: {text_response}")
         return jsonify({"text": text_response}), 200

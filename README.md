@@ -61,6 +61,17 @@ pip install -r requirements.txt
 - `N8N_WEBHOOK_URL`: URL do webhook do n8n (opcional - para integração com n8n se desejado)
 - `LOG_LEVEL`: Nível de log (opcional, padrão: INFO)
 
+**Variáveis de Memória (ChromaDB):**
+- `MEMORY_ENABLED`: Habilita memória de longo prazo (opcional, padrão: false)
+- `CHROMADB_PATH`: Caminho para armazenar dados do ChromaDB (opcional, padrão: ./data/chromadb)
+- `CHROMADB_COLLECTION_NAME`: Nome da coleção ChromaDB (opcional, padrão: tangerina_memory)
+- `EMBEDDING_PROVIDER`: Provedor de embeddings - 'sentence_transformers' (padrão) ou 'openai'
+- `OPENAI_EMBEDDING_MODEL`: Modelo de embedding OpenAI (opcional, padrão: text-embedding-3-small)
+- `SENTENCE_TRANSFORMER_MODEL`: Modelo SentenceTransformer (opcional, padrão: all-MiniLM-L6-v2)
+- `MAX_RETRIEVAL_RESULTS`: Número máximo de memórias a recuperar (opcional, padrão: 10)
+- `MEMORY_SIMILARITY_THRESHOLD`: Limiar de similaridade para recuperação (opcional, padrão: 0.7)
+- `MEMORY_RETENTION_DAYS`: Dias de retenção de memórias (opcional, padrão: 30)
+
 ## Configuração do Spotify (Opcional)
 
 Para habilitar a integração com Spotify:
@@ -267,6 +278,17 @@ As respostas do chatbot não são enviadas automaticamente via Discord através 
 - `TTS_PROVIDER` - Provedor TTS: 'elevenlabs' ou 'piper' (padrão: elevenlabs)
 - `ELEVEN_API_KEY` - Chave da API ElevenLabs para TTS
 - `WHISPER_PROVIDER` - Provedor de transcrição de voz: 'zhipu' (GLM-ASR-2512) ou 'openai' (Whisper local) (padrão: zhipu)
+
+**Variáveis de Memória (ChromaDB):**
+- `MEMORY_ENABLED` - Habilita memória de longo prazo (padrão: false)
+- `CHROMADB_PATH` - Caminho para armazenar dados do ChromaDB (padrão: ./data/chromadb)
+- `CHROMADB_COLLECTION_NAME` - Nome da coleção ChromaDB (padrão: tangerina_memory)
+- `EMBEDDING_PROVIDER` - Provedor de embeddings: 'sentence_transformers' (padrão) ou 'openai'
+- `OPENAI_EMBEDDING_MODEL` - Modelo de embedding OpenAI (padrão: text-embedding-3-small)
+- `SENTENCE_TRANSFORMER_MODEL` - Modelo SentenceTransformer (padrão: all-MiniLM-L6-v2)
+- `MAX_RETRIEVAL_RESULTS` - Número máximo de memórias a recuperar (padrão: 10)
+- `MEMORY_SIMILARITY_THRESHOLD` - Limiar de similaridade para recuperação (padrão: 0.7)
+- `MEMORY_RETENTION_DAYS` - Dias de retenção de memórias (padrão: 30)
 
 ## Solução de Problemas
 

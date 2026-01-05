@@ -17,7 +17,9 @@ RUN if [ "$WHISPER_PROVIDER" = "openai" ]; then \
     pip install --no-cache-dir openai-whisper; \
 fi
 
-COPY . .
+COPY app.py flask_routes.py ./
+COPY chatbot/ ./chatbot/
+COPY features/ ./features/
 
 CMD ["python", "app.py"]
 

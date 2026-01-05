@@ -21,3 +21,5 @@ __pycache__/
 **/piper/models
 
 **/whisper/cache/**
+
+data/chromadb/

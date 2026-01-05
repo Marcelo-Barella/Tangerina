@@ -140,7 +140,8 @@ class MusicBot:
                     getattr(self, 'music_service', None),
                     getattr(self, 'chatbot', None),
                     getattr(self, 'tts_providers', {}),
-                    getattr(self, 'speak_tts_func', None)
+                    getattr(self, 'speak_tts_func', None),
+                    getattr(self, 'openai_api_key', None)
                 )
                 sink.music_bot_ref = self
                 if hasattr(vc, 'listen'):

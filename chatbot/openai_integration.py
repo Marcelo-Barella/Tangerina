@@ -8,8 +8,8 @@ logger = logging.getLogger(__name__)
 
 
 class OpenAIChatbot(BaseChatbot):
-    def __init__(self, api_key: str, bot_instance=None, music_bot_instance=None):
-        super().__init__(api_key, bot_instance, music_bot_instance)
+    def __init__(self, api_key: str, bot_instance=None, music_bot_instance=None, memory_manager=None):
+        super().__init__(api_key, bot_instance, music_bot_instance, memory_manager)
         logger.info("OpenAI chatbot initialized")
 
     def _initialize_client(self, api_key: str):

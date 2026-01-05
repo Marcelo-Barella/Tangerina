@@ -11,6 +11,7 @@ services:
       - ../.env
     environment:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - WHISPER_API_URL=${WHISPER_API_URL:-http://whisper-asr:5002}
     ports:
       - "5000:5000"
     volumes:
