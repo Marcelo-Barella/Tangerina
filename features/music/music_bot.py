@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from typing import Optional, Dict, Any
 import discord
 import yt_dlp
@@ -147,11 +148,13 @@ class MusicBot:
                 if hasattr(vc, 'listen'):
                     vc.listen(sink)
                 self.voice_sinks[guild_id] = sink
+                sink._start_health_monitor()
             else:
                 sink = self.voice_sinks[guild_id]
                 sink._voice_client = vc
                 if hasattr(vc, 'listen'):
                     vc.listen(sink)
+                sink._start_health_monitor()
         else:
             vc = await channel.connect()
             self.voice_clients[guild_id] = vc
@@ -254,6 +257,47 @@ class MusicBot:
             return None
 
         return await YTDLSource.search_youtube(youtube_query, ytdl=self.ytdl)
+
+    async def reconnect_voice_client(self, guild_id: int, voice_recv_module=None) -> Optional[discord.VoiceClient]:
+        if voice_recv_module is None:
+            try:
+                from discord.ext import voice_recv as vr_module
+                voice_recv_module = vr_module
+            except ImportError:
+                voice_recv_module = None
+        if guild_id not in self.voice_sinks:
+            logger.error(f"Cannot reconnect: no sink found for guild {guild_id}")
+            return None
+        sink = self.voice_sinks[guild_id]
+        if not sink._voice_client or not sink._voice_client.channel:
+            logger.error(f"Cannot reconnect: voice client or channel not available for guild {guild_id}")
+            return None
+        channel = sink._voice_client.channel
+        try:
+            if guild_id in self.voice_clients:
+                vc = self.voice_clients[guild_id]
+                if vc.is_connected():
+                    await vc.disconnect(force=True)
+                del self.voice_clients[guild_id]
+            await asyncio.sleep(1)
+            if voice_recv_module:
+                vc = await channel.connect(cls=voice_recv_module.VoiceRecvClient)
+                self.voice_clients[guild_id] = vc
+                sink._voice_client = vc
+                if hasattr(vc, 'listen'):
+                    vc.listen(sink)
+            else:
+                vc = await channel.connect()
+                self.voice_clients[guild_id] = vc
+                sink._voice_client = vc
+            sink._start_health_monitor()
+            sink.last_audio_timestamps.clear()
+            sink._sink_created_time = time.time()
+            logger.info(f"Successfully reconnected voice client for guild {guild_id}")
+            return vc
+        except Exception as e:
+            logger.error(f"Error reconnecting voice client for guild {guild_id}: {e}")
+            return None
 
     def get_current_music_source(self, guild_id: int) -> Optional[Dict[str, Any]]:
         if guild_id not in self.voice_clients:
