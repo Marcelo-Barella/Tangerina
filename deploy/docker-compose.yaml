@@ -19,6 +19,10 @@ services:
       - ../logs:/app/logs
     networks:
       - tangerina-network
+    dns: # DNS resolvers to use for the container ( Disoord trolled me so I added this)
+      - 8.8.8.8
+      - 8.8.4.4
+      - 1.1.1.1
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s

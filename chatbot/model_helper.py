@@ -5,6 +5,15 @@ from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
 
+logger = logging.getLogger(__name__)
+
+def _debug_log(location: str, message: str, data: Optional[Dict[str, Any]] = None):
+    if logger.isEnabledFor(logging.DEBUG):
+        log_msg = f"[{location}] {message}"
+        if data:
+            log_msg += f" | Data: {json.dumps(data, ensure_ascii=False)}"
+        logger.debug(log_msg)
+
 DEFAULT_PERSONA_FALLBACK = "\n".join([
     "IDENTIDADE",
     "- Nome: Tangerina",
@@ -262,13 +271,7 @@ def build_tools_schema() -> List[Dict[str, Any]]:
 
 
 def build_tool_mapping(tools_schema: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
-    return {
-        tool_def["function"]["name"]: {
-            "required": tool_def["function"]["parameters"].get("required", []),
-            "properties": tool_def["function"]["parameters"].get("properties", {})
-        }
-        for tool_def in tools_schema
-    }
+    return {tool_def["function"]["name"]: {"required": tool_def["function"]["parameters"].get("required", []), "properties": tool_def["function"]["parameters"].get("properties", {})} for tool_def in tools_schema}
 
 
 def _normalize_integer_ids(tool_name: str, parameters: Dict[str, Any], tool_mapping: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
@@ -279,16 +282,17 @@ def _normalize_integer_ids(tool_name: str, parameters: Dict[str, Any], tool_mapp
     normalized = parameters.copy()
     
     for param_name, param_value in normalized.items():
-        if param_name in properties and properties[param_name].get("type") == "integer":
-            if isinstance(param_value, float) and param_value.is_integer():
-                normalized[param_name] = int(param_value)
-            elif isinstance(param_value, str):
-                try:
-                    float_value = float(param_value)
-                    if float_value.is_integer():
-                        normalized[param_name] = int(float_value)
-                except (ValueError, OverflowError):
-                    pass
+        if param_name not in properties or properties[param_name].get("type") != "integer":
+            continue
+        if isinstance(param_value, float) and param_value.is_integer():
+            normalized[param_name] = int(param_value)
+        elif isinstance(param_value, str):
+            try:
+                float_value = float(param_value)
+                if float_value.is_integer():
+                    normalized[param_name] = int(float_value)
+            except (ValueError, OverflowError):
+                pass
     
     return normalized
 
@@ -314,9 +318,6 @@ def load_tangerina_persona() -> str:
 
 def build_system_text(persona_context: str) -> str:
     return SYSTEM_PROMPT_TEMPLATE.format(persona_context=persona_context.strip()).strip()
-
-
-logger = logging.getLogger(__name__)
 
 
 class BaseChatbot(ABC):
@@ -477,7 +478,7 @@ class BaseChatbot(ABC):
         if retrieved_memories:
             memory_texts = [mem.get("content", "") for mem in retrieved_memories if mem.get("content")]
             if memory_texts:
-                memories_section = "\n\nMEMÓRIAS RELEVANTES:\n" + "\n".join([f"- {mem}" for mem in memory_texts])
+                memories_section = "\n\nMEMORIAS RELEVANTES (use estas informacoes para contextualizar sua resposta):\n" + "\n".join([f"- {mem}" for mem in memory_texts])
                 system_content += memories_section
         
         messages = [{"role": "system", "content": system_content}]
@@ -510,12 +511,12 @@ class BaseChatbot(ABC):
     def _parse_tool_call_from_text(self, text: str) -> Optional[Tuple[str, Dict[str, Any]]]:
         text = text.strip()
         tool_names = [tool["function"]["name"] for tool in self._tools_schema]
-        
+
         xml_patterns = [
             (r"<tool_call>(\w+)(.*?)</tool_call>", True),
             (r"^(\w+)\s*\n\s*(.*?)</tool_call>", True),
         ]
-        
+
         for pattern, use_xml_args in xml_patterns:
             match = re.search(pattern, text, re.DOTALL | re.MULTILINE)
             if match:
@@ -524,14 +525,15 @@ class BaseChatbot(ABC):
                     params = self._parse_xml_args(match.group(2)) if use_xml_args else {}
                     if params or not use_xml_args:
                         return tool_name, params
-        
+
         for tool_name in tool_names:
-            for pattern in [
+            json_patterns = [
                 rf"^{re.escape(tool_name)}\s*\n\s*(\{{.*?\}})",
                 rf"^{re.escape(tool_name)}\s+(\{{.*?\}})",
                 rf"^{re.escape(tool_name)}\s*:\s*(\{{.*?\}})",
                 rf"^{re.escape(tool_name)}\s*(\{{.*?\}})",
-            ]:
+            ]
+            for pattern in json_patterns:
                 match = re.search(pattern, text, re.DOTALL | re.MULTILINE)
                 if match:
                     try:
@@ -540,7 +542,20 @@ class BaseChatbot(ABC):
                             return tool_name, params
                     except (json.JSONDecodeError, Exception):
                         continue
-        
+
+        return None
+
+    def _extract_text_from_malformed_tool_call(self, content: str) -> Optional[str]:
+        patterns = [
+            r'SEND_Mensagem\s*\([^)]*text\s*=\s*"([^"]+)"',
+            r'SEND_Mensagem\s*\([^)]*text\s*=\s*\'([^\']+)\'',
+            r'text\s*=\s*"([^"]+)"',
+            r'text\s*=\s*\'([^\']+)\'',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, content, re.DOTALL)
+            if match:
+                return match.group(1).strip()
         return None
 
     def _parse_tool_call(self, tool_call) -> Optional[Tuple[str, Dict[str, Any]]]:
@@ -579,22 +594,20 @@ class BaseChatbot(ABC):
         tool_result = await self._call_tool(tool_name, tool_params, app_functions or {}, guild_id, channel_id, user_id)
         tool_calls_executed.append({"tool": tool_name, "parameters": tool_params, "result": tool_result})
         
-        send_mensagem_executed = False
-        if tool_name == "SEND_Mensagem" and tool_result.get("success"):
-            send_mensagem_executed = True
+        send_mensagem_executed = tool_name == "SEND_Mensagem" and tool_result.get("success")
+        if send_mensagem_executed:
             sent_text = str(tool_params.get("text", ""))
             if sent_text:
                 sent_message_texts.append(sent_text.strip())
         
-        if tool_result.get("success"):
-            if tool_name == "EnterChannel":
-                return f"Entrei no canal {tool_result.get('channel_name', 'canal')}!", send_mensagem_executed
-            elif tool_name == "SEND_Mensagem":
-                return "", send_mensagem_executed
-            else:
-                return "Ação executada com sucesso!", send_mensagem_executed
-        else:
+        if not tool_result.get("success"):
             return f"Erro ao executar ação: {tool_result.get('error', 'Erro desconhecido')}", send_mensagem_executed
+        
+        if tool_name == "EnterChannel":
+            return f"Entrei no canal {tool_result.get('channel_name', 'canal')}!", send_mensagem_executed
+        if tool_name == "SEND_Mensagem":
+            return " ".join(sent_message_texts) if sent_message_texts else "", send_mensagem_executed
+        return "Ação executada com sucesso!", send_mensagem_executed
 
     async def generate_response_with_tools(self, message: str, context: Optional[List[Dict]] = None,
                                           guild_id: Optional[int] = None, channel_id: Optional[int] = None,
@@ -632,8 +645,17 @@ class BaseChatbot(ABC):
                 if tool_calls:
                     parsed_tool_calls = []
                     tool_results = []
+                    has_web_search = False
                     
                     for tool_call in tool_calls:
+                        tool_type = getattr(tool_call, "type", None) if hasattr(tool_call, "type") else None
+                        if isinstance(tool_call, dict):
+                            tool_type = tool_call.get("type")
+                        
+                        if tool_type == "web_search_preview":
+                            has_web_search = True
+                            continue
+                        
                         parsed = self._parse_tool_call(tool_call)
                         if not parsed:
                             continue
@@ -659,20 +681,26 @@ class BaseChatbot(ABC):
                         })
                         tool_results.append((tool_name, tool_result, tool_call_id))
                     
-                    assistant_message = {
-                        "role": "assistant",
-                        "content": None,
-                        "tool_calls": parsed_tool_calls
-                    }
-                    messages.append(assistant_message)
+                    if has_web_search and not parsed_tool_calls:
+                        continue
                     
-                    for tool_name, tool_result, tool_call_id in tool_results:
-                        messages.append(self._build_tool_message(tool_name, tool_result, tool_call_id))
+                    if parsed_tool_calls:
+                        assistant_message = {
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": parsed_tool_calls
+                        }
+                        messages.append(assistant_message)
+                        
+                        for tool_name, tool_result, tool_call_id in tool_results:
+                            messages.append(self._build_tool_message(tool_name, tool_result, tool_call_id))
                     
                     continue
                 
                 if not isinstance(content, str) or not content.strip():
                     if finish_reason == "stop":
+                        if send_mensagem_executed and sent_message_texts:
+                            return " ".join(sent_message_texts), tool_calls_executed
                         if send_mensagem_executed:
                             return "", tool_calls_executed
                         if tool_calls_executed:
@@ -681,12 +709,12 @@ class BaseChatbot(ABC):
                 
                 content_stripped = content.strip()
                 
-                result = await self._handle_tool_call_from_text(
+                tool_call_result = await self._handle_tool_call_from_text(
                     content_stripped, app_functions or {}, guild_id, channel_id, user_id,
                     tool_calls_executed, sent_message_texts
                 )
-                if result:
-                    response_text, msg_executed = result
+                if tool_call_result:
+                    response_text, msg_executed = tool_call_result
                     if msg_executed:
                         send_mensagem_executed = True
                     return response_text, tool_calls_executed
@@ -695,31 +723,33 @@ class BaseChatbot(ABC):
                     return ("", tool_calls_executed) if send_mensagem_executed else ("Ação executada.", tool_calls_executed)
                 
                 if send_mensagem_executed and content_stripped in sent_message_texts:
-                    return "", tool_calls_executed
+                    return " ".join(sent_message_texts), tool_calls_executed
                 
                 if finish_reason == "stop":
                     if content_stripped:
-                        return content_stripped, tool_calls_executed
-                    if send_mensagem_executed:
-                        return "", tool_calls_executed
-                    if tool_calls_executed:
-                        return "Ação executada.", tool_calls_executed
+                        extracted = self._extract_text_from_malformed_tool_call(content_stripped)
+                        return extracted if extracted else content_stripped, tool_calls_executed
+                    if send_mensagem_executed and sent_message_texts:
+                        return " ".join(sent_message_texts), tool_calls_executed
+                    if send_mensagem_executed or tool_calls_executed:
+                        return "" if send_mensagem_executed else "Ação executada.", tool_calls_executed
                     return "Ação executada.", tool_calls_executed
                 
-                elif finish_reason == "length":
+                if finish_reason == "length":
                     if content_stripped:
                         logger.warning("Response truncated due to length limit")
-                        return content_stripped, tool_calls_executed
+                        extracted = self._extract_text_from_malformed_tool_call(content_stripped)
+                        return extracted if extracted else content_stripped, tool_calls_executed
                     break
                 
-                elif finish_reason == "tool_calls":
+                if finish_reason == "tool_calls":
                     logger.warning("finish_reason is 'tool_calls' but no tool_calls found")
                     break
                 
-                else:
-                    if content_stripped:
-                        return content_stripped, tool_calls_executed
-                    break
+                if content_stripped:
+                    extracted = self._extract_text_from_malformed_tool_call(content_stripped)
+                    return extracted if extracted else content_stripped, tool_calls_executed
+                break
                 
             except Exception as e:
                 logger.error(f"API request failed: {e}")
@@ -752,8 +782,8 @@ class BaseChatbot(ABC):
                 if isinstance(content, str) and content.strip():
                     return content.strip()
         elif isinstance(response, dict):
-            data = response.get("data", {})
-            choices = data.get("choices", [])
+            response_data = response.get("data", {})
+            choices = response_data.get("choices", [])
             if choices:
                 content = choices[0].get("content", "")
                 if isinstance(content, str) and content.strip():

@@ -1,0 +1,81 @@
+version: '3.8'
+
+services:
+  tangerina-test:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.test
+    container_name: tangerina-test
+    environment:
+      - PYTHONPATH=/app
+      - DISCORD_TOKEN=test_token_not_used
+      - ZHIPUAI_API_KEY=test_key_not_used
+    volumes:
+      - ../tests:/app/tests
+      - ../htmlcov:/app/htmlcov
+    networks:
+      - tangerina-test-network
+    command: >
+      pytest tests/
+      -v
+      --cov=chatbot
+      --cov=features
+      --cov=flask_routes
+      --cov-report=term
+      --cov-report=html
+      --cov-report=xml
+
+  tangerina-test-unit:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.test
+    container_name: tangerina-test-unit
+    environment:
+      - PYTHONPATH=/app
+    volumes:
+      - ../tests:/app/tests
+    networks:
+      - tangerina-test-network
+    command: pytest tests/unit/ -v -m unit
+    profiles:
+      - unit
+
+  tangerina-test-integration:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.test
+    container_name: tangerina-test-integration
+    environment:
+      - PYTHONPATH=/app
+      - DISCORD_TOKEN=test_token_not_used
+      - ZHIPUAI_API_KEY=test_key_not_used
+    volumes:
+      - ../tests:/app/tests
+    networks:
+      - tangerina-test-network
+    command: pytest tests/integration/ -v -m integration
+    profiles:
+      - integration
+
+  tangerina-test-watch:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.test
+    container_name: tangerina-test-watch
+    environment:
+      - PYTHONPATH=/app
+    volumes:
+      - ../tests:/app/tests
+      - ../chatbot:/app/chatbot
+      - ../features:/app/features
+      - ../flask_routes.py:/app/flask_routes.py
+    networks:
+      - tangerina-test-network
+    command: pytest tests/ -v --cov=chatbot --cov=features --cov=flask_routes -f
+    profiles:
+      - watch
+
+networks:
+  tangerina-test-network:
+    driver: bridge
+    name: tangerina-test-network

@@ -7,11 +7,17 @@ AGENTS.md
 tangerina_persona.txt
 
 .venv/
+venv/
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.so
 .Python
+*.egg-info/
+dist/
+build/
+.eggs/
 .env
 *.log
 .DS_Store
@@ -23,3 +29,11 @@ __pycache__/
 **/whisper/cache/**
 
 data/chromadb/
+
+.pytest_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+.hypothesis/

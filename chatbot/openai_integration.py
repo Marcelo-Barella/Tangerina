@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import os
 from typing import Optional, Dict, Any, List
 from openai import OpenAI
 from chatbot.model_helper import BaseChatbot
@@ -16,16 +17,26 @@ class OpenAIChatbot(BaseChatbot):
         self.client = OpenAI(api_key=api_key)
 
     def _get_models_to_try(self) -> List[str]:
-        return ['gpt-4o-mini']
+        model = os.getenv('OPENAI_MODEL', 'gpt-4o-mini-search-preview')
+        return [model]
 
     def _make_sync_api_request(self, model_name: str, messages: List[Dict],
                                max_tokens: int, tools: Optional[List]) -> Any:
+        tools_list = list(tools) if tools else []
+        
+        if 'search' in model_name.lower() or model_name == 'gpt-4o-mini-search-preview':
+            web_search_tool = {"type": "web_search_preview", "location": {"country": "BR"}}
+            if tools_list:
+                tools_list.append(web_search_tool)
+            else:
+                tools_list = [web_search_tool]
+        
         return self.client.chat.completions.create(
             model=model_name,
             messages=messages,
             temperature=0.7,
             max_tokens=max_tokens,
-            tools=tools
+            tools=tools_list if tools_list else None
         )
 
     async def _make_api_request(self, messages: List[Dict], max_tokens: int = 1000, tools: Optional[List] = None):

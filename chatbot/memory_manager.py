@@ -24,8 +24,9 @@ def _debug_log(session_id, run_id, hypothesis_id, location, message, data):
         Path(DEBUG_LOG_PATH).parent.mkdir(parents=True, exist_ok=True)
         with open(DEBUG_LOG_PATH, "a") as f:
             f.write(json.dumps(log_entry) + "\n")
-    except Exception:
-        pass
+        logger.debug(f"[{location}] {message} | session={session_id} run={run_id} data={json.dumps(data)}")
+    except Exception as e:
+        logger.error(f"Failed to write debug log: {e}")
 
 
 class MemoryManager:
@@ -38,7 +39,10 @@ class MemoryManager:
         self.chromadb_path = os.getenv('CHROMADB_PATH', './data/chromadb')
         self.collection_name = os.getenv('CHROMADB_COLLECTION_NAME', 'tangerina_memory')
         self.max_results = int(os.getenv('MAX_RETRIEVAL_RESULTS', '10'))
-        self.similarity_threshold = float(os.getenv('MEMORY_SIMILARITY_THRESHOLD', '0.7'))
+        threshold = float(os.getenv('MEMORY_SIMILARITY_THRESHOLD', '0.3'))
+        self.similarity_threshold = min(threshold, 0.4)
+        if threshold > 0.4:
+            logger.warning(f"Similarity threshold {threshold} is too high for semantic search, capping at 0.4")
         self.retention_days = int(os.getenv('MEMORY_RETENTION_DAYS', '30'))
         
         if not self.embedding_service:
@@ -116,14 +120,26 @@ class MemoryManager:
         try:
             document = f"User: {user_message} Bot: {bot_response}"
             
+            document_preview = document[:200] + "..." if len(document) > 200 else document
+            
             # #region agent log
-            _debug_log("debug-session", "store", "A", "memory_manager.py:store_conversation:75", "before embedding generation", {"document_length": len(document)})
+            _debug_log("debug-session", "store", "A", "memory_manager.py:store_conversation:75", "document content before storage", {"document_length": len(document), "document_preview": document_preview, "doc_id": None})
             # #endregion
             
             embedding = await self.embedding_service.embed_text(document)
             
+            embedding_type = type(embedding).__name__ if embedding else None
+            embedding_is_list = isinstance(embedding, (list, tuple)) if embedding else False
+            embedding_sample = embedding[:5] if embedding and isinstance(embedding, (list, tuple)) and len(embedding) > 0 else None
+            
             # #region agent log
-            _debug_log("debug-session", "store", "A", "memory_manager.py:store_conversation:80", "after embedding generation", {"embedding_length": len(embedding) if embedding else 0, "has_embedding": bool(embedding)})
+            _debug_log("debug-session", "store", "A", "memory_manager.py:store_conversation:80", "after embedding generation", {
+                "embedding_length": len(embedding) if embedding else 0,
+                "has_embedding": bool(embedding),
+                "embedding_type": embedding_type,
+                "embedding_is_list": embedding_is_list,
+                "embedding_sample": embedding_sample
+            })
             # #endregion
             
             if not embedding:
@@ -144,33 +160,94 @@ class MemoryManager:
             if tool_calls:
                 metadata["tool_calls"] = str(len(tool_calls))
             
-            # #region agent log
-            _debug_log("debug-session", "store", "B", "memory_manager.py:store_conversation:99", "metadata before storage", {"metadata": metadata})
-            # #endregion
-            
             import uuid
             doc_id = str(uuid.uuid4())
             
             # #region agent log
-            _debug_log("debug-session", "store", "A", "memory_manager.py:store_conversation:105", "before collection.add", {"doc_id": doc_id, "collection_count_before": self._collection.count() if hasattr(self._collection, 'count') else "unknown"})
+            _debug_log("debug-session", "store", "B", "memory_manager.py:store_conversation:99", "metadata before storage", {"metadata": metadata, "doc_id": doc_id, "metadata_keys": list(metadata.keys())})
             # #endregion
             
-            self._collection.add(
-                ids=[doc_id],
-                embeddings=[embedding],
-                documents=[document],
-                metadatas=[metadata]
-            )
+            collection_count_before = self._collection.count() if hasattr(self._collection, 'count') else None
+            existing_ids = []
+            try:
+                existing_results = self._collection.get(limit=100)
+                if existing_results and existing_results.get('ids'):
+                    existing_ids = existing_results['ids'][:10]
+            except Exception:
+                pass
             
             # #region agent log
-            _debug_log("debug-session", "store", "A", "memory_manager.py:store_conversation:115", "after collection.add", {"doc_id": doc_id, "collection_count_after": self._collection.count() if hasattr(self._collection, 'count') else "unknown"})
+            self._debug_collection_contents("debug-session", "store")
+            _debug_log("debug-session", "store", "A", "memory_manager.py:store_conversation:105", "before collection.add", {
+                "doc_id": doc_id,
+                "collection_count_before": collection_count_before,
+                "existing_ids_sample": existing_ids
+            })
             # #endregion
             
-            logger.debug(f"Stored conversation memory: {doc_id}")
+            add_params = {
+                "ids": [doc_id],
+                "embeddings_count": 1,
+                "documents_count": 1,
+                "metadatas_count": 1,
+                "embedding_length": len(embedding) if embedding else 0,
+                "document_length": len(document)
+            }
+            
+            # #region agent log
+            _debug_log("debug-session", "store", "A", "memory_manager.py:store_conversation:115", "collection.add parameters", add_params)
+            # #endregion
+            
+            try:
+                self._collection.add(
+                    ids=[doc_id],
+                    embeddings=[embedding],
+                    documents=[document],
+                    metadatas=[metadata]
+                )
+                
+                collection_count_after = self._collection.count() if hasattr(self._collection, 'count') else None
+                
+                # #region agent log
+                _debug_log("debug-session", "store", "A", "memory_manager.py:store_conversation:125", "after collection.add", {
+                    "doc_id": doc_id,
+                    "collection_count_after": collection_count_after,
+                    "collection_count_increased": (collection_count_after is not None and collection_count_before is not None and collection_count_after > collection_count_before)
+                })
+                # #endregion
+                
+                verification_result = await self._verify_document_stored(doc_id, "debug-session", "store")
+                
+                # #region agent log
+                _debug_log("debug-session", "store", "A", "memory_manager.py:store_conversation:135", "post-storage verification", {
+                    "doc_id": doc_id,
+                    "verification_passed": verification_result
+                })
+                # #endregion
+                
+                logger.debug(f"Stored conversation memory: {doc_id}")
+            except Exception as add_error:
+                error_details = {
+                    "error": str(add_error),
+                    "error_type": type(add_error).__name__,
+                    "doc_id": doc_id,
+                    "add_params": add_params
+                }
+                logger.error(f"ChromaDB collection.add error: {add_error}", exc_info=True)
+                # #region agent log
+                _debug_log("debug-session", "store", "A", "memory_manager.py:store_conversation:145", "collection.add exception", error_details)
+                # #endregion
+                raise
         except Exception as e:
+            import traceback
+            error_traceback = traceback.format_exc()
             logger.error(f"Error storing conversation: {e}", exc_info=True)
             # #region agent log
-            _debug_log("debug-session", "store", "A", "memory_manager.py:store_conversation:121", "store_conversation exception", {"error": str(e), "error_type": type(e).__name__})
+            _debug_log("debug-session", "store", "A", "memory_manager.py:store_conversation:155", "store_conversation exception", {
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "traceback": error_traceback
+            })
             # #endregion
 
     async def retrieve_context(
@@ -213,7 +290,15 @@ class MemoryManager:
             
             # #region agent log
             self._debug_collection_contents("debug-session", "retrieve")
-            _debug_log("debug-session", "retrieve", "D", "memory_manager.py:retrieve_context:137", "before where clause construction", {"guild_id": guild_id, "channel_id": channel_id, "user_id": user_id, "collection_count": self._collection.count() if hasattr(self._collection, 'count') else "unknown"})
+            collection_count = self._collection.count() if hasattr(self._collection, 'count') else None
+            all_stored_metadata = []
+            try:
+                all_results = self._collection.get()
+                if all_results and all_results.get('metadatas'):
+                    all_stored_metadata = all_results['metadatas'][:5]
+            except Exception:
+                pass
+            _debug_log("debug-session", "retrieve", "F", "memory_manager.py:retrieve_context:137", "before where clause construction", {"guild_id": guild_id, "channel_id": channel_id, "user_id": user_id, "collection_count": collection_count, "sample_stored_metadata": all_stored_metadata})
             # #endregion
             
             conditions = [
@@ -225,7 +310,23 @@ class MemoryManager:
             where_clause = {"$and": conditions}
             
             # #region agent log
-            _debug_log("debug-session", "retrieve", "D", "memory_manager.py:retrieve_context:147", "where clause constructed", {"where_clause": where_clause, "conditions_count": len(conditions)})
+            _debug_log("debug-session", "retrieve", "F", "memory_manager.py:retrieve_context:147", "where clause constructed", {"where_clause": where_clause, "conditions_count": len(conditions), "query_guild_id_str": str(guild_id) if guild_id else None, "query_channel_id_str": str(channel_id), "query_user_id_str": str(user_id)})
+            # #endregion
+            
+            # #region agent log
+            query_no_where_result = None
+            try:
+                query_no_where_result = self._collection.query(
+                    query_embeddings=[query_embedding],
+                    n_results=min(5, max_results)
+                )
+                no_where_docs_count = len(query_no_where_result.get('documents', [[]])[0]) if query_no_where_result and query_no_where_result.get('documents') and query_no_where_result['documents'][0] else 0
+                no_where_metadata_sample = []
+                if query_no_where_result and query_no_where_result.get('metadatas') and query_no_where_result['metadatas'][0]:
+                    no_where_metadata_sample = query_no_where_result['metadatas'][0][:3]
+                _debug_log("debug-session", "retrieve", "I", "memory_manager.py:retrieve_context:151", "query without where clause", {"documents_count": no_where_docs_count, "sample_metadata": no_where_metadata_sample})
+            except Exception as e:
+                _debug_log("debug-session", "retrieve", "I", "memory_manager.py:retrieve_context:157", "query without where clause error", {"error": str(e)})
             # #endregion
             
             # #region agent log
@@ -239,7 +340,26 @@ class MemoryManager:
             )
             
             # #region agent log
-            _debug_log("debug-session", "retrieve", "E", "memory_manager.py:retrieve_context:158", "after collection.query", {"results_keys": list(results.keys()) if results else [], "has_documents": bool(results and results.get('documents')), "documents_count": len(results.get('documents', [[]])[0]) if results and results.get('documents') and results['documents'][0] else 0})
+            results_structure = {}
+            if results:
+                results_structure = {
+                    "has_ids": bool(results.get('ids')),
+                    "has_documents": bool(results.get('documents')),
+                    "has_metadatas": bool(results.get('metadatas')),
+                    "has_distances": bool(results.get('distances')),
+                    "ids_type": type(results.get('ids')).__name__ if results.get('ids') else None,
+                    "documents_type": type(results.get('documents')).__name__ if results.get('documents') else None,
+                    "ids_length": len(results.get('ids', [])) if results.get('ids') else 0,
+                    "documents_nested_length": len(results.get('documents', [])) if results.get('documents') else 0,
+                    "documents_inner_length": len(results.get('documents', [[]])[0]) if results.get('documents') and results['documents'][0] else 0,
+                    "metadatas_nested_length": len(results.get('metadatas', [])) if results.get('metadatas') else 0,
+                    "metadatas_inner_length": len(results.get('metadatas', [[]])[0]) if results.get('metadatas') and results['metadatas'][0] else 0
+                }
+                if results.get('documents') and results['documents'][0]:
+                    results_structure["documents_sample"] = [doc[:50] + "..." if len(doc) > 50 else doc for doc in results['documents'][0][:2]]
+                if results.get('metadatas') and results['metadatas'][0]:
+                    results_structure["metadatas_sample"] = results['metadatas'][0][:2]
+            _debug_log("debug-session", "retrieve", "G", "memory_manager.py:retrieve_context:178", "after collection.query - full structure", results_structure)
             # #endregion
             
             memories = []
@@ -249,24 +369,44 @@ class MemoryManager:
                 distances = results.get('distances', [[]])[0] if results.get('distances') else []
                 
                 # #region agent log
-                _debug_log("debug-session", "retrieve", "E", "memory_manager.py:retrieve_context:166", "processing query results", {"documents_count": len(documents), "metadatas_count": len(metadatas), "distances_count": len(distances), "similarity_threshold": self.similarity_threshold})
+                sample_doc = documents[0] if documents else None
+                sample_meta = metadatas[0] if metadatas else {}
+                sample_distance = distances[0] if distances else None
+                _debug_log("debug-session", "retrieve", "H", "memory_manager.py:retrieve_context:166", "processing query results", {"documents_count": len(documents), "metadatas_count": len(metadatas), "distances_count": len(distances), "similarity_threshold": self.similarity_threshold, "sample_doc_preview": sample_doc[:100] if sample_doc else None, "sample_metadata": sample_meta, "sample_distance": sample_distance})
                 # #endregion
                 
                 for idx, doc in enumerate(documents):
                     distance = distances[idx] if idx < len(distances) else 1.0
                     similarity = 1.0 - distance
                     
+                    doc_metadata = metadatas[idx] if idx < len(metadatas) else {}
+                    metadata_matches = {
+                        "channel_id_match": doc_metadata.get('channel_id') == str(channel_id) if doc_metadata.get('channel_id') else False,
+                        "user_id_match": doc_metadata.get('user_id') == str(user_id) if doc_metadata.get('user_id') else False,
+                        "guild_id_match": (doc_metadata.get('guild_id') == str(guild_id)) if (guild_id and doc_metadata.get('guild_id')) else (not guild_id and (doc_metadata.get('guild_id') is None or doc_metadata.get('guild_id') == 'None')),
+                        "doc_metadata_channel_id": doc_metadata.get('channel_id'),
+                        "doc_metadata_user_id": doc_metadata.get('user_id'),
+                        "doc_metadata_guild_id": doc_metadata.get('guild_id')
+                    }
+                    
                     # #region agent log
-                    _debug_log("debug-session", "retrieve", "E", "memory_manager.py:retrieve_context:174", "processing document", {"idx": idx, "distance": distance, "similarity": similarity, "meets_threshold": similarity >= self.similarity_threshold, "metadata": metadatas[idx] if idx < len(metadatas) else {}})
+                    _debug_log("debug-session", "retrieve", "J", "memory_manager.py:retrieve_context:194", "processing document", {"idx": idx, "distance": distance, "similarity": similarity, "similarity_threshold": self.similarity_threshold, "meets_threshold": similarity >= self.similarity_threshold, "metadata": doc_metadata, "metadata_matches": metadata_matches})
                     # #endregion
                     
                     if similarity >= self.similarity_threshold:
-                        metadata = metadatas[idx] if idx < len(metadatas) else {}
                         memories.append({
                             "content": doc,
-                            "metadata": metadata,
+                            "metadata": doc_metadata,
                             "similarity": similarity
                         })
+                    else:
+                        # #region agent log
+                        _debug_log("debug-session", "retrieve", "J", "memory_manager.py:retrieve_context:204", "document filtered by similarity", {"idx": idx, "similarity": similarity, "threshold": self.similarity_threshold, "diff": self.similarity_threshold - similarity})
+                        # #endregion
+            else:
+                # #region agent log
+                _debug_log("debug-session", "retrieve", "H", "memory_manager.py:retrieve_context:171", "no documents in results", {"results_is_none": results is None, "has_documents_key": bool(results and 'documents' in results), "documents_is_empty_list": bool(results and results.get('documents') == []), "documents_is_none": bool(results and results.get('documents') is None)})
+                # #endregion
             
             # #region agent log
             _debug_log("debug-session", "retrieve", "A", "memory_manager.py:retrieve_context:186", "retrieve_context return", {"memories_count": len(memories)})
@@ -348,10 +488,50 @@ class MemoryManager:
             all_results = self._collection.get()
             if all_results and all_results.get('ids'):
                 metadatas = all_results.get('metadatas', [])
+                user_ids = [m.get('user_id') if m else None for m in metadatas]
                 guild_ids = [m.get('guild_id') if m else None for m in metadatas]
                 channel_ids = [m.get('channel_id') if m else None for m in metadatas]
-                _debug_log(session_id, run_id, "B", "memory_manager.py:_debug_collection_contents", "collection contents", {"total_count": len(all_results['ids']), "unique_guild_ids": list(set(guild_ids)), "unique_channel_ids": list(set(channel_ids)), "sample_metadatas": metadatas[:3]})
+                metadata_types = []
+                for m in metadatas[:3]:
+                    if m:
+                        metadata_types.append({
+                            "guild_id_type": type(m.get('guild_id')).__name__ if m.get('guild_id') is not None else "None",
+                            "guild_id_value": m.get('guild_id'),
+                            "channel_id_type": type(m.get('channel_id')).__name__ if m.get('channel_id') is not None else "None",
+                            "user_id_type": type(m.get('user_id')).__name__ if m.get('user_id') is not None else "None"
+                        })
+                _debug_log(session_id, run_id, "F", "memory_manager.py:_debug_collection_contents", "collection contents", {"total_count": len(all_results['ids']), "unique_user_ids": list(set(user_ids)), "unique_guild_ids": list(set(guild_ids)), "unique_channel_ids": list(set(channel_ids)), "metadata_types_sample": metadata_types, "sample_metadatas": metadatas[:3]})
             else:
-                _debug_log(session_id, run_id, "B", "memory_manager.py:_debug_collection_contents", "collection contents", {"total_count": 0})
+                _debug_log(session_id, run_id, "F", "memory_manager.py:_debug_collection_contents", "collection contents", {"total_count": 0})
         except Exception as e:
-            _debug_log(session_id, run_id, "B", "memory_manager.py:_debug_collection_contents", "collection contents error", {"error": str(e)})
+            _debug_log(session_id, run_id, "F", "memory_manager.py:_debug_collection_contents", "collection contents error", {"error": str(e)})
+    
+    async def _verify_document_stored(self, doc_id: str, session_id: str, run_id: str) -> bool:
+        if not self._initialized:
+            return False
+        try:
+            result = self._collection.get(ids=[doc_id])
+            if result and result.get('ids') and doc_id in result['ids']:
+                idx = result['ids'].index(doc_id)
+                document = result.get('documents', [])[idx] if result.get('documents') and idx < len(result['documents']) else None
+                metadata = result.get('metadatas', [])[idx] if result.get('metadatas') and idx < len(result['metadatas']) else None
+                _debug_log(session_id, run_id, "B", "memory_manager.py:_verify_document_stored", "document verification success", {
+                    "doc_id": doc_id,
+                    "has_document": document is not None,
+                    "has_metadata": metadata is not None,
+                    "document_length": len(document) if document else 0
+                })
+                return True
+            else:
+                _debug_log(session_id, run_id, "B", "memory_manager.py:_verify_document_stored", "document verification failed", {
+                    "doc_id": doc_id,
+                    "result_ids": result.get('ids', []) if result else []
+                })
+                return False
+        except Exception as e:
+            _debug_log(session_id, run_id, "B", "memory_manager.py:_verify_document_stored", "document verification error", {
+                "doc_id": doc_id,
+                "error": str(e),
+                "error_type": type(e).__name__
+            })
+            return False
