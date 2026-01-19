@@ -7,13 +7,6 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-def _debug_log(location: str, message: str, data: Optional[Dict[str, Any]] = None):
-    if logger.isEnabledFor(logging.DEBUG):
-        log_msg = f"[{location}] {message}"
-        if data:
-            log_msg += f" | Data: {json.dumps(data, ensure_ascii=False)}"
-        logger.debug(log_msg)
-
 DEFAULT_PERSONA_FALLBACK = "\n".join([
     "IDENTIDADE",
     "- Nome: Tangerina",
@@ -266,6 +259,23 @@ def build_tools_schema() -> List[Dict[str, Any]]:
                     "required": ["guild_id", "channel_id", "text"]
                 }
             }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "WebSearch",
+                "description": "Searches the web for current information, news, facts, or any topic. Use this when you need up-to-date information that may not be in your training data.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "The search query to look up on the web"
+                        }
+                    },
+                    "required": ["query"]
+                }
+            }
         }
     ]
 
@@ -321,12 +331,13 @@ def build_system_text(persona_context: str) -> str:
 
 
 class BaseChatbot(ABC):
-    def __init__(self, api_key: str, bot_instance=None, music_bot_instance=None, memory_manager=None):
+    def __init__(self, api_key: str, bot_instance=None, music_bot_instance=None, memory_manager=None, web_search_service=None):
         self._initialize_client(api_key)
         self.persona_context = load_tangerina_persona()
         self.bot = bot_instance
         self.music_bot = music_bot_instance
         self.memory_manager = memory_manager
+        self.web_search_service = web_search_service
         self._tools_schema = build_tools_schema()
         self._tool_mapping = build_tool_mapping(self._tools_schema)
 
@@ -413,6 +424,7 @@ class BaseChatbot(ABC):
             "MusicSpotifyPlay": lambda p, f: self._call_app_function("play_spotify_music", f, int(p["guild_id"]), int(p["channel_id"]), str(p["spotify_uri"])),
             "MusicLeave": lambda p, f: self._call_app_function("leave_music", f, int(p["guild_id"])),
             "TTSSpeak": lambda p, f: self._call_app_function("speak_tts", f, int(p["guild_id"]), int(p["channel_id"]), str(p["text"])),
+            "WebSearch": self._handle_web_search
         }
         
         handler = tool_handlers.get(tool_name)
@@ -456,6 +468,21 @@ class BaseChatbot(ABC):
         if vc:
             return {"success": True, "channel_id": parameters["channel_id"], "channel_name": vc.channel.name if vc.channel else None}
         return {"success": False, "error": "Failed to join voice channel"}
+
+    async def _handle_web_search(self, parameters: Dict[str, Any], app_functions: Dict[str, Any]) -> Dict[str, Any]:
+        if not self.web_search_service:
+            return {"success": False, "error": "Web search service not available"}
+        
+        query = str(parameters.get("query", "")).strip()
+        if not query:
+            return {"success": False, "error": "Query cannot be empty"}
+        
+        try:
+            result = self.web_search_service.search(query)
+            return result if result.get("success") else {"success": False, "error": result.get("error", "Search failed"), "results": []}
+        except Exception as e:
+            logger.error(f"Web search error: {e}")
+            return {"success": False, "error": str(e), "results": []}
 
     def _build_messages(self, message: str, context: Optional[List[Dict]] = None,
                        guild_id: Optional[int] = None, channel_id: Optional[int] = None,
@@ -645,17 +672,8 @@ class BaseChatbot(ABC):
                 if tool_calls:
                     parsed_tool_calls = []
                     tool_results = []
-                    has_web_search = False
                     
                     for tool_call in tool_calls:
-                        tool_type = getattr(tool_call, "type", None) if hasattr(tool_call, "type") else None
-                        if isinstance(tool_call, dict):
-                            tool_type = tool_call.get("type")
-                        
-                        if tool_type == "web_search_preview":
-                            has_web_search = True
-                            continue
-                        
                         parsed = self._parse_tool_call(tool_call)
                         if not parsed:
                             continue
@@ -680,9 +698,6 @@ class BaseChatbot(ABC):
                             }
                         })
                         tool_results.append((tool_name, tool_result, tool_call_id))
-                    
-                    if has_web_search and not parsed_tool_calls:
-                        continue
                     
                     if parsed_tool_calls:
                         assistant_message = {

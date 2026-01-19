@@ -8,8 +8,8 @@ logger = logging.getLogger(__name__)
 
 
 class ZhipuChatbot(BaseChatbot):
-    def __init__(self, api_key: str, bot_instance=None, music_bot_instance=None, memory_manager=None, model: str = "glm-4-plus"):
-        super().__init__(api_key, bot_instance, music_bot_instance, memory_manager)
+    def __init__(self, api_key: str, bot_instance=None, music_bot_instance=None, memory_manager=None, web_search_service=None, model: str = "glm-4-plus"):
+        super().__init__(api_key, bot_instance, music_bot_instance, memory_manager, web_search_service)
         self.model = model
         self._fallback_models = ["glm-4-plus", "glm-4-flash", "glm-3-turbo", "glm-4"]
         logger.info(f"ZhipuAI GLM initialized with model {model}")

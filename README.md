@@ -121,12 +121,12 @@ Para usar o OpenAI GPT como provedor:
    ```
    MODEL_PROVIDER=openai
    OPENAI_API_KEY=sua_api_key_aqui
-   OPENAI_MODEL=gpt-4o-mini-search-preview
+   OPENAI_MODEL=gpt-4o-mini
    ```
 
-**Modelos utilizados:** GPT-4o Mini Search Preview (padrão)
+**Modelos utilizados:** GPT-4o Mini (padrão)
 
-O modelo `gpt-4o-mini-search-preview` possui busca na web integrada, permitindo que o bot obtenha informações atualizadas automaticamente quando necessário. O modelo decide automaticamente quando realizar buscas na web baseado no contexto da conversa. Você pode configurar um modelo diferente usando a variável `OPENAI_MODEL` (ex: `gpt-4o-mini`, `gpt-4o`, etc.).
+Você pode configurar um modelo diferente usando a variável `OPENAI_MODEL` (ex: `gpt-4o`, etc.).
 
 ### Provedor Google Gemini
 
@@ -222,6 +222,7 @@ O bot utiliza o provedor de IA configurado (ZhipuAI GLM, OpenAI GPT ou Google Ge
 13. **MusicSpotifyPlay** - Toca Spotify específico
 14. **MusicLeave** - Sai do canal e limpa recursos
 15. **TTSSpeak** - Síntese de voz via ElevenLabs ou Piper
+16. **WebSearch** - Pesquisa na web para obter informações atualizadas
 
 O modelo de IA decide automaticamente quais ferramentas usar baseado no contexto da mensagem do usuário.
 
@@ -271,7 +272,7 @@ As respostas do chatbot não são enviadas automaticamente via Discord através 
 - `MODEL_PROVIDER` (opcional, padrão: 'zhipu') - Provedor de IA: 'zhipu', 'openai' ou 'gemini'
 - `ZHIPU_API_KEY` - Chave da API ZhipuAI GLM (obrigatório se MODEL_PROVIDER=zhipu)
 - `OPENAI_API_KEY` - Chave da API OpenAI (obrigatório se MODEL_PROVIDER=openai, também usado para Whisper se WHISPER_PROVIDER=openai)
-- `OPENAI_MODEL` (opcional, padrão: 'gpt-4o-mini-search-preview') - Modelo OpenAI a ser usado. O modelo padrão possui busca na web integrada.
+- `OPENAI_MODEL` (opcional, padrão: 'gpt-4o-mini') - Modelo OpenAI a ser usado.
 - `GEMINI_API_KEY` - Chave da API Google Gemini (obrigatório se MODEL_PROVIDER=gemini)
 
 **Variáveis Opcionais:**

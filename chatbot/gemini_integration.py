@@ -248,8 +248,8 @@ def normalize_gemini_response_to_openai_like(response: Any) -> Any:
 
 
 class GeminiChatbot(BaseChatbot):
-    def __init__(self, api_key: str, bot_instance=None, music_bot_instance=None, memory_manager=None):
-        super().__init__(api_key, bot_instance, music_bot_instance, memory_manager)
+    def __init__(self, api_key: str, bot_instance=None, music_bot_instance=None, memory_manager=None, web_search_service=None):
+        super().__init__(api_key, bot_instance, music_bot_instance, memory_manager, web_search_service)
     
     def _initialize_client(self, api_key: str):
         self.client = genai.Client(api_key=api_key)

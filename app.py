@@ -2,35 +2,12 @@ import os
 import logging
 import asyncio
 import threading
-import json
 from typing import Optional, Dict, Any
-from datetime import datetime
-from pathlib import Path
 import discord
 from discord import Intents
 from discord.ext import commands
 from dotenv import load_dotenv
 import aiohttp
-
-DEBUG_LOG_PATH = "/app/logs/debug.log"
-
-def _debug_log(session_id, run_id, hypothesis_id, location, message, data):
-    try:
-        log_entry = {
-            "id": f"log_{int(datetime.utcnow().timestamp() * 1000)}",
-            "timestamp": int(datetime.utcnow().timestamp() * 1000),
-            "location": location,
-            "message": message,
-            "data": data,
-            "sessionId": session_id,
-            "runId": run_id,
-            "hypothesisId": hypothesis_id
-        }
-        Path(DEBUG_LOG_PATH).parent.mkdir(parents=True, exist_ok=True)
-        with open(DEBUG_LOG_PATH, "a") as f:
-            f.write(json.dumps(log_entry) + "\n")
-    except Exception:
-        pass
 
 try:
     from features.music.spotify_integration import SpotifyIntegration
@@ -64,6 +41,11 @@ except ImportError:
     MemoryManager = None
 
 try:
+    from chatbot.web_search_service import TavilyWebSearchService
+except ImportError:
+    TavilyWebSearchService = None
+
+try:
     from features.tts.piper_tts import PiperTTS
 except ImportError:
     PiperTTS = None
@@ -75,47 +57,30 @@ from flask_routes import create_flask_app
 
 load_dotenv()
 
-logging.basicConfig(
-    level=os.getenv('LOG_LEVEL', 'INFO'),
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=os.getenv('LOG_LEVEL', 'INFO'), format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 DISCORD_BOT_TOKEN = os.getenv('DISCORD_BOT_TOKEN')
-N8N_WEBHOOK_URL = os.getenv('N8N_WEBHOOK_URL')
-SPOTIFY_CLIENT_ID = os.getenv('SPOTIFY_CLIENT_ID')
-SPOTIFY_CLIENT_SECRET = os.getenv('SPOTIFY_CLIENT_SECRET')
-MODEL_PROVIDER = os.getenv('MODEL_PROVIDER', 'zhipu')
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-ZHIPU_API_KEY = os.getenv('ZHIPU_API_KEY')
-TTS_PROVIDER = os.getenv('TTS_PROVIDER', 'elevenlabs')
-WHISPER_PROVIDER = os.getenv('WHISPER_PROVIDER', 'sidecar')
-ELEVEN_API_KEY = os.getenv('ELEVEN_API_KEY')
-ELEVEN_VOICE_ID = "iP95p4xoKVk53GoZ742B"
-ELEVEN_MODEL = "eleven_multilingual_v2"
-ELEVEN_OUTPUT_FORMAT = "mp3_44100_128"
-
 if not DISCORD_BOT_TOKEN:
     raise ValueError('DISCORD_BOT_TOKEN environment variable is required')
 
+N8N_WEBHOOK_URL = os.getenv('N8N_WEBHOOK_URL')
 if not N8N_WEBHOOK_URL:
     logger.warning('N8N_WEBHOOK_URL not set. n8n integration will be disabled.')
 
 intents = Intents.default()
 intents.message_content = True
 intents.voice_states = True
-
 bot = commands.Bot(command_prefix='!', intents=intents)
 bot_loop: Optional[asyncio.AbstractEventLoop] = None
 
 music_bot = MusicBot(bot)
-music_bot.zhipu_api_key = ZHIPU_API_KEY
-music_bot.whisper_provider = WHISPER_PROVIDER
-music_bot.openai_api_key = OPENAI_API_KEY
+music_bot.zhipu_api_key = os.getenv('ZHIPU_API_KEY')
+music_bot.whisper_provider = os.getenv('WHISPER_PROVIDER', 'sidecar')
+music_bot.openai_api_key = os.getenv('OPENAI_API_KEY')
 
 spotify_client = None
-if SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET and SpotifyIntegration:
+if SpotifyIntegration and (SPOTIFY_CLIENT_ID := os.getenv('SPOTIFY_CLIENT_ID')) and (SPOTIFY_CLIENT_SECRET := os.getenv('SPOTIFY_CLIENT_SECRET')):
     try:
         spotify_client = SpotifyIntegration(SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET)
         logger.info("Spotify integration enabled")
@@ -126,21 +91,9 @@ music_service = MusicService(bot, music_bot, spotify_client)
 music_bot.music_service = music_service
 
 memory_manager = None
-MEMORY_ENABLED = os.getenv('MEMORY_ENABLED', 'false').lower() == 'true'
-
-# #region agent log
-_debug_log("debug-session", "init", "A", "app.py:106", "MemoryManager init check", {"MEMORY_ENABLED": MEMORY_ENABLED, "MemoryManager_class_exists": MemoryManager is not None})
-# #endregion
-
-if MEMORY_ENABLED and MemoryManager:
+if os.getenv('MEMORY_ENABLED', 'false').lower() == 'true' and MemoryManager:
     try:
-        # #region agent log
-        _debug_log("debug-session", "init", "A", "app.py:111", "Creating MemoryManager instance", {})
-        # #endregion
         memory_manager = MemoryManager()
-        # #region agent log
-        _debug_log("debug-session", "init", "A", "app.py:114", "MemoryManager created", {"initialized": memory_manager._initialized if memory_manager else False})
-        # #endregion
         if memory_manager._initialized:
             logger.info("MemoryManager initialized successfully")
         else:
@@ -148,37 +101,34 @@ if MEMORY_ENABLED and MemoryManager:
             memory_manager = None
     except Exception as e:
         logger.warning(f"MemoryManager disabled: {e}")
-        # #region agent log
-        _debug_log("debug-session", "init", "A", "app.py:122", "MemoryManager creation exception", {"error": str(e)})
-        # #endregion
-else:
-    # #region agent log
-    _debug_log("debug-session", "init", "A", "app.py:125", "MemoryManager not enabled or class missing", {"MEMORY_ENABLED": MEMORY_ENABLED, "MemoryManager_exists": MemoryManager is not None})
-    # #endregion
 
-chatbot = None
+web_search_service = None
+if os.getenv('WEB_SEARCH_ENABLED', 'true').lower() == 'true' and (TAVILY_API_KEY := os.getenv('TAVILY_API_KEY')) and TavilyWebSearchService:
+    try:
+        web_search_service = TavilyWebSearchService(TAVILY_API_KEY)
+        logger.info("Web search service initialized")
+    except Exception as e:
+        logger.warning(f"Web search service disabled: {e}")
+
+MODEL_PROVIDER = os.getenv('MODEL_PROVIDER', 'zhipu')
 provider_map = {
-    'openai': (OpenAIChatbot, OPENAI_API_KEY),
-    'gemini': (GeminiChatbot, GEMINI_API_KEY),
-    'zhipu': (ZhipuChatbot, ZHIPU_API_KEY)
+    'openai': (OpenAIChatbot, os.getenv('OPENAI_API_KEY')),
+    'gemini': (GeminiChatbot, os.getenv('GEMINI_API_KEY')),
+    'zhipu': (ZhipuChatbot, os.getenv('ZHIPU_API_KEY'))
 }
 
-if MODEL_PROVIDER in provider_map:
-    ChatbotClass, api_key = provider_map[MODEL_PROVIDER]
-    if ChatbotClass and api_key:
-        try:
-            # #region agent log
-            _debug_log("debug-session", "init", "A", "app.py:133", "Creating chatbot with memory_manager", {"memory_manager_is_none": memory_manager is None})
-            # #endregion
-            chatbot = ChatbotClass(api_key, None, None, memory_manager)
-            # #region agent log
-            _debug_log("debug-session", "init", "A", "app.py:136", "Chatbot created", {"chatbot_has_memory_manager": hasattr(chatbot, 'memory_manager'), "chatbot_memory_manager_is_none": chatbot.memory_manager is None if hasattr(chatbot, 'memory_manager') else "no_attr"})
-            # #endregion
-            logger.info(f"{MODEL_PROVIDER.capitalize()} chatbot initialized")
-        except Exception as e:
-            logger.warning(f"{MODEL_PROVIDER.capitalize()} chatbot disabled: {e}")
+chatbot = None
+if MODEL_PROVIDER in provider_map and (ChatbotClass := provider_map[MODEL_PROVIDER][0]) and (api_key := provider_map[MODEL_PROVIDER][1]):
+    try:
+        chatbot = ChatbotClass(api_key, None, None, memory_manager, web_search_service)
+        logger.info(f"{MODEL_PROVIDER.capitalize()} chatbot initialized")
+    except Exception as e:
+        logger.warning(f"{MODEL_PROVIDER.capitalize()} chatbot disabled: {e}")
 
 tts_providers = {}
+TTS_PROVIDER = os.getenv('TTS_PROVIDER', 'elevenlabs')
+ELEVEN_API_KEY = os.getenv('ELEVEN_API_KEY')
+
 if TTS_PROVIDER == 'elevenlabs' and ELEVEN_API_KEY and set_eleven_api_key:
     set_eleven_api_key(ELEVEN_API_KEY)
     tts_providers['elevenlabs'] = True
@@ -193,15 +143,14 @@ elif TTS_PROVIDER == 'piper' and PiperTTS:
 music_bot.chatbot = chatbot
 music_bot.tts_providers = tts_providers
 
-async def _resolve_channel(guild_id: int, channel_id: int) -> tuple[Optional[int], Optional[str]]:
-    return await _resolve_voice_channel(guild_id, channel_id, bot, music_bot)
-
 async def speak_tts(guild_id: int, channel_id: int, text: str, provider: Optional[str] = None) -> Dict[str, Any]:
+    async def resolve_channel(gid: int, cid: int) -> tuple[Optional[int], Optional[str]]:
+        return await _resolve_voice_channel(gid, cid, bot, music_bot)
     return await speak_tts_unified(
         guild_id, channel_id, text, provider or TTS_PROVIDER, tts_providers,
         tts_generate, set_eleven_api_key, ELEVEN_API_KEY,
-        ELEVEN_VOICE_ID, ELEVEN_MODEL, ELEVEN_OUTPUT_FORMAT,
-        music_bot, _resolve_channel, music_bot.ytdl, YTDLSource
+        "iP95p4xoKVk53GoZ742B", "eleven_multilingual_v2", "mp3_44100_128",
+        music_bot, resolve_channel, music_bot.ytdl, YTDLSource
     )
 
 async def speak_piper_tts(guild_id: int, channel_id: int, text: str) -> Dict[str, Any]:
@@ -212,7 +161,6 @@ music_bot.speak_tts_func = speak_piper_tts
 flask_app, set_bot_loop = create_flask_app(
     bot, music_bot, music_service, chatbot, speak_tts, speak_piper_tts
 )
-
 
 async def forward_to_n8n(msg_data: Dict[str, Any]) -> Optional[int]:
     if not N8N_WEBHOOK_URL:
@@ -280,7 +228,6 @@ def should_respond_with_chatbot(message) -> bool:
     content = message.content.lower().strip()
     return 'tangerina' in content or (bot.user and bot.user.mentioned_in(message)) or message.guild is None
 
-
 @bot.event
 async def on_message(message: discord.Message) -> None:
     if message.author.bot:
@@ -290,13 +237,11 @@ async def on_message(message: discord.Message) -> None:
 
     try:
         msg_data = extract_message_data(message)
-        should_chat = chatbot and should_respond_with_chatbot(message)
-
-        if should_chat:
+        if chatbot and should_respond_with_chatbot(message):
             guild_id = message.guild.id if message.guild else None
             channel_id = message.channel.id
             user_id = message.author.id
-            
+
             music_functions = {
                 "get_user_voice_channel": music_service.get_user_voice_channel,
                 "play_music": music_service.play_music,
@@ -310,64 +255,25 @@ async def on_message(message: discord.Message) -> None:
                 "leave_music": music_service.leave_music,
                 "speak_tts": speak_tts,
             }
-            
-            async def generate():
-                # #region agent log
-                _debug_log("debug-session", "message", "A", "app.py:272", "generate() entry", {"has_chatbot": chatbot is not None, "chatbot_has_memory_manager": hasattr(chatbot, 'memory_manager') if chatbot else False, "memory_manager_is_none": chatbot.memory_manager is None if (chatbot and hasattr(chatbot, 'memory_manager')) else "no_chatbot_or_attr", "guild_id": guild_id, "channel_id": channel_id, "user_id": user_id})
-                # #endregion
-                retrieved_memories = []
-                if chatbot.memory_manager:
-                    # #region agent log
-                    _debug_log("debug-session", "message", "A", "app.py:276", "Calling retrieve_context", {"query_length": len(message.content)})
-                    # #endregion
-                    retrieved_memories = await chatbot.memory_manager.retrieve_context(
-                        message.content, guild_id, channel_id, user_id
-                    )
-                    # #region agent log
-                    _debug_log("debug-session", "message", "A", "app.py:281", "retrieve_context returned", {"memories_count": len(retrieved_memories)})
-                    # #endregion
-                else:
-                    # #region agent log
-                    _debug_log("debug-session", "message", "A", "app.py:284", "Skipping retrieve_context - no memory_manager", {})
-                    # #endregion
-                
-                response, tool_calls = await chatbot.generate_response_with_tools(
-                    message.content, [], guild_id, channel_id, user_id, music_functions, retrieved_memories
-                )
-                
-                if chatbot.memory_manager:
-                    # #region agent log
-                    _debug_log("debug-session", "message", "A", "app.py:291", "Calling store_conversation", {"response_length": len(response) if response else 0})
-                    # #endregion
-                    await chatbot.memory_manager.store_conversation(
-                        message.content, response, guild_id, channel_id, user_id, tool_calls
-                    )
-                    # #region agent log
-                    _debug_log("debug-session", "message", "A", "app.py:296", "store_conversation completed", {})
-                    # #endregion
-                else:
-                    # #region agent log
-                    _debug_log("debug-session", "message", "A", "app.py:299", "Skipping store_conversation - no memory_manager", {})
-                    # #endregion
-                
-                return response, tool_calls
-            
-            typing_ctx = getattr(message.channel, 'typing', None)
-            if typing_ctx:
-                async with typing_ctx():
-                    response, tool_calls = await generate()
-            else:
-                response, tool_calls = await generate()
-            
-            msg_data['chatbot_response'] = response
-            msg_data['tool_calls'] = tool_calls
-        
+
+            retrieved_memories = []
+            if chatbot.memory_manager:
+                retrieved_memories = await chatbot.memory_manager.retrieve_context(message.content, guild_id, channel_id, user_id)
+
+            response, tool_calls = await chatbot.generate_response_with_tools(
+                message.content, [], guild_id, channel_id, user_id, music_functions, retrieved_memories
+            )
+
+            if chatbot.memory_manager:
+                await chatbot.memory_manager.store_conversation(message.content, response, guild_id, channel_id, user_id, tool_calls)
+
+            msg_data.update({'chatbot_response': response, 'tool_calls': tool_calls})
+
         if N8N_WEBHOOK_URL:
             await forward_to_n8n(msg_data)
 
     except Exception as e:
         logger.error(f'Error processing message: {e}')
-
 
 @bot.event
 async def on_error(event: str, *args: Any, **kwargs: Any) -> None:
@@ -391,7 +297,6 @@ if not tts_providers:
     logger.warning("No TTS provider configured")
 
 if __name__ == '__main__':
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
+    threading.Thread(target=run_flask, daemon=True).start()
     logger.info('Flask API started on http://0.0.0.0:5000')
     run_discord()
