@@ -11,8 +11,7 @@ def mock_guild():
     guild = MagicMock()
     guild.id = 123456789
     guild.name = "Test Guild"
-    guild.voice_channels = []
-    guild.text_channels = []
+    guild.voice_channels = guild.text_channels = []
     guild.me = MagicMock()
     guild.get_channel = MagicMock(return_value=None)
     return guild
@@ -47,34 +46,65 @@ def mock_member():
 def mock_bot():
     bot = MagicMock()
     bot.is_ready = MagicMock(return_value=True)
-    bot.get_guild = MagicMock(return_value=None)
-    bot.get_channel = MagicMock(return_value=None)
+    bot.get_guild = bot.get_channel = MagicMock(return_value=None)
     bot.loop = asyncio.get_event_loop()
     return bot
 
 @pytest.fixture
 def mock_music_bot():
     music_bot = MagicMock()
-    music_bot.voice_clients = {}
-    music_bot.queues = {}
-    music_bot.current_songs = {}
-    music_bot.original_volumes = {}
-    music_bot.join_voice_channel = AsyncMock()
-    music_bot.play_next = AsyncMock()
+    music_bot.voice_clients = music_bot.queues = music_bot.current_songs = music_bot.original_volumes = {}
+    music_bot.join_voice_channel = music_bot.play_next = AsyncMock()
     return music_bot
 
 @pytest.fixture
 def mock_music_service():
+    import json
+    import os
     service = MagicMock()
-    service.play_music = AsyncMock(return_value={'success': True})
-    service.stop_music = AsyncMock(return_value={'success': True})
-    service.skip_music = AsyncMock(return_value={'success': True})
-    service.pause_music = AsyncMock(return_value={'success': True})
-    service.resume_music = AsyncMock(return_value={'success': True})
-    service.set_volume = AsyncMock(return_value={'success': True, 'volume': 50})
-    service.get_queue = AsyncMock(return_value={'queue': [], 'current': None})
+    # #region agent log
+    try:
+        os.makedirs('/app/logs', exist_ok=True)
+        with open('/app/logs/debug.log', 'a') as f:
+            log_entry = {
+                'location': 'conftest.py:61',
+                'message': 'mock_music_service_fixture',
+                'data': {
+                    'service_type': str(type(service)),
+                    'methods_being_set': ['play_music', 'stop_music', 'skip_music', 'pause_music', 'resume_music', 'leave_music', 'set_volume', 'get_queue']
+                },
+                'hypothesisId': 'A',
+                'timestamp': 0
+            }
+            f.write(json.dumps(log_entry) + '\n')
+    except Exception:
+        pass
+    # #endregion
+    for method in ['play_music', 'stop_music', 'skip_music', 'pause_music', 'resume_music', 'leave_music']:
+        getattr(service, method).return_value = {'success': True}
+    service.set_volume.return_value = {'success': True, 'volume': 50}
+    service.get_queue.return_value = {'queue': [], 'current': None}
     service.get_user_voice_channel = AsyncMock()
-    service.leave_music = AsyncMock(return_value={'success': True})
+    # #region agent log
+    try:
+        import inspect
+        with open('/app/logs/debug.log', 'a') as f:
+            log_entry = {
+                'location': 'conftest.py:68',
+                'message': 'mock_music_service_after_setup',
+                'data': {
+                    'set_volume_is_async': inspect.iscoroutinefunction(service.set_volume),
+                    'set_volume_return_type': str(type(service.set_volume.return_value)),
+                    'play_music_is_async': inspect.iscoroutinefunction(service.play_music),
+                    'play_music_return_type': str(type(service.play_music.return_value))
+                },
+                'hypothesisId': 'A',
+                'timestamp': 0
+            }
+            f.write(json.dumps(log_entry) + '\n')
+    except Exception:
+        pass
+    # #endregion
     return service
 
 @pytest.fixture
@@ -83,18 +113,9 @@ def flask_client(mock_bot, mock_music_bot, mock_music_service):
 
     chatbot = MagicMock()
     chatbot.generate_response = AsyncMock(return_value="Test response")
-    speak_tts_func = AsyncMock()
-    speak_piper_tts_func = AsyncMock()
+    speak_funcs = [AsyncMock() for _ in range(2)]
 
-    app, set_loop = create_flask_app(
-        mock_bot,
-        mock_music_bot,
-        mock_music_service,
-        chatbot,
-        speak_tts_func,
-        speak_piper_tts_func
-    )
-
+    app, set_loop = create_flask_app(mock_bot, mock_music_bot, mock_music_service, chatbot, *speak_funcs)
     set_loop(asyncio.get_event_loop())
     app.config['TESTING'] = True
 
@@ -105,14 +126,30 @@ def flask_client(mock_bot, mock_music_bot, mock_music_service):
 def ephemeral_chromadb():
     try:
         import chromadb
+        import uuid
         client = chromadb.EphemeralClient()
-        collection = client.create_collection(
-            name="test_collection",
-            metadata={"hnsw:space": "cosine"}
-        )
-        yield client, collection
+        yield client
+        for collection in client.list_collections():
+            try:
+                client.delete_collection(collection.name)
+            except Exception:
+                pass
     except ImportError:
         pytest.skip("ChromaDB not installed")
+
+@pytest.fixture
+def memory_manager(ephemeral_chromadb, mock_embedding_service):
+    import uuid
+    from chatbot.memory_manager import MemoryManager
+    manager = MemoryManager(embedding_service=mock_embedding_service)
+    manager._client = ephemeral_chromadb
+    collection_name = f"test_{uuid.uuid4().hex[:8]}"
+    manager._collection = ephemeral_chromadb.create_collection(
+        name=collection_name,
+        metadata={"hnsw:space": "cosine"}
+    )
+    manager._initialized = True
+    return manager
 
 @pytest.fixture
 def mock_embedding_service():

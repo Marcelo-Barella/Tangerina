@@ -256,7 +256,7 @@ async def on_message(message: discord.Message) -> None:
                 "speak_tts": speak_tts,
             }
 
-            retrieved_memories = []
+            retrieved_memories = {"recent": [], "semantic": []}
             if chatbot.memory_manager:
                 retrieved_memories = await chatbot.memory_manager.retrieve_context(message.content, guild_id, channel_id, user_id)
 

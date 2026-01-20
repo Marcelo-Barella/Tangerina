@@ -5,7 +5,8 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     curl \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /app/logs
 
 COPY requirements.txt requirements-test.txt ./
 

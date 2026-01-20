@@ -7,22 +7,27 @@ cd "$(dirname "$0")"
 case "${1:-all}" in
     all)
         echo "Running all tests with coverage..."
+        (cd deploy && docker-compose -f docker-compose.test.yml down --remove-orphans 2>/dev/null || true)
         cd deploy && docker-compose -f docker-compose.test.yml up --build --abort-on-container-exit tangerina-test
         ;;
     unit)
         echo "Running unit tests..."
+        (cd deploy && docker-compose -f docker-compose.test.yml down --remove-orphans 2>/dev/null || true)
         cd deploy && docker-compose -f docker-compose.test.yml --profile unit up --build --abort-on-container-exit tangerina-test-unit
         ;;
     integration)
         echo "Running integration tests..."
+        (cd deploy && docker-compose -f docker-compose.test.yml down --remove-orphans 2>/dev/null || true)
         cd deploy && docker-compose -f docker-compose.test.yml --profile integration up --build --abort-on-container-exit tangerina-test-integration
         ;;
     watch)
         echo "Running tests in watch mode (Ctrl+C to stop)..."
+        (cd deploy && docker-compose -f docker-compose.test.yml down --remove-orphans 2>/dev/null || true)
         cd deploy && docker-compose -f docker-compose.test.yml --profile watch up --build tangerina-test-watch
         ;;
     coverage)
         echo "Running tests and generating coverage report..."
+        (cd deploy && docker-compose -f docker-compose.test.yml down --remove-orphans 2>/dev/null || true)
         cd deploy && docker-compose -f docker-compose.test.yml up --build --abort-on-container-exit tangerina-test
         echo "Opening coverage report..."
         if command -v xdg-open > /dev/null; then
