@@ -503,10 +503,31 @@ class BaseChatbot(ABC):
             system_content += "\n\nIMPORTANTE: Ao chamar ferramentas que requerem guild_id, channel_id ou user_id, use SEMPRE os valores do contexto atual acima. NUNCA use valores mockados ou de exemplo."
         
         if retrieved_memories:
-            memory_texts = [mem.get("content", "") for mem in retrieved_memories if mem.get("content")]
-            if memory_texts:
-                memories_section = "\n\nMEMORIAS RELEVANTES (use estas informacoes para contextualizar sua resposta):\n" + "\n".join([f"- {mem}" for mem in memory_texts])
-                system_content += memories_section
+            if isinstance(retrieved_memories, dict):
+                recent_memories = retrieved_memories.get("recent", [])
+                semantic_memories = retrieved_memories.get("semantic", [])
+                
+                if recent_memories:
+                    recent_texts = [
+                        f"[{mem.get('timestamp', '')[:19]}] {mem.get('content', '')}"
+                        for mem in recent_memories
+                    ]
+                    if recent_texts:
+                        memories_section = "\n\nMEMORIAS RECENTES (últimas 3 interações):\n"
+                        memories_section += "\n".join([f"{i+1}. {text}" for i, text in enumerate(recent_texts)])
+                        system_content += memories_section
+                
+                if semantic_memories:
+                    semantic_texts = [mem.get("content", "") for mem in semantic_memories if mem.get("content")]
+                    if semantic_texts:
+                        memories_section = "\n\nMEMORIAS RELEVANTES DO PASSADO (baseadas em similaridade semântica):\n"
+                        memories_section += "\n".join([f"- {text}" for text in semantic_texts])
+                        system_content += memories_section
+            else:
+                memory_texts = [mem.get("content", "") for mem in retrieved_memories if mem.get("content")]
+                if memory_texts:
+                    memories_section = "\n\nMEMORIAS RELEVANTES (use estas informacoes para contextualizar sua resposta):\n" + "\n".join([f"- {mem}" for mem in memory_texts])
+                    system_content += memories_section
         
         messages = [{"role": "system", "content": system_content}]
         messages.extend(normalize_context(context))

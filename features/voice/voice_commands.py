@@ -499,6 +499,8 @@ class VoiceCommandSink(BaseSink):
         retrieved_memories = await self.chatbot.memory_manager.retrieve_context(
             text, self.guild_id, None, member.id
         )
+        if not isinstance(retrieved_memories, dict):
+            retrieved_memories = {"recent": [], "semantic": retrieved_memories if isinstance(retrieved_memories, list) else []}
         response = await self.chatbot.generate_response_with_tools(
             text, [], self.guild_id, None, member.id, {}, retrieved_memories
         )
