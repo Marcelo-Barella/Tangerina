@@ -17,6 +17,8 @@ services:
     volumes:
       - ../tangerina_persona.txt:/app/tangerina_persona.txt:ro
       - ../logs:/app/logs
+      - ../.cursor:/app/.cursor
+      - chromadb_data:/app/data/chromadb
     networks:
       - tangerina-network
     dns: # DNS resolvers to use for the container ( Disoord trolled me so I added this)
@@ -80,6 +82,25 @@ services:
     profiles:
       - n8n
 
+  chromadb-viz:
+    build:
+      context: ./chromadb-viz
+      dockerfile: Dockerfile
+    container_name: tangerina-chromadb-viz
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    volumes:
+      - chromadb_data:/data/chromadb
+    networks:
+      - tangerina-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
 networks:
   tangerina-network:
     driver: bridge
@@ -90,4 +111,6 @@ volumes:
     name: tangerina-n8n-data
   piper_models:
     name: tangerina-piper-models
+  chromadb_data:
+    name: tangerina-chromadb-data
 
