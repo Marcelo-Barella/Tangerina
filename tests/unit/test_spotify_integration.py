@@ -1,4 +1,5 @@
 import pytest
+from unittest.mock import MagicMock, patch
 from features.music.spotify_integration import SpotifyIntegration
 
 @pytest.fixture
@@ -176,3 +177,248 @@ class TestSpotifyIntegrationTrackToYoutubeQuery:
         }
         result = spotify_integration.track_to_youtube_query(track)
         assert result == 'Luis Fonsi Despacito'
+
+
+@pytest.mark.unit
+class TestSpotifyIntegrationInit:
+    @patch('features.music.spotify_integration.spotipy.Spotify')
+    @patch('features.music.spotify_integration.SpotifyClientCredentials')
+    def test_init_creates_spotify_client(self, mock_creds, mock_spotify):
+        integration = SpotifyIntegration('client_id', 'client_secret')
+
+        mock_creds.assert_called_once_with(client_id='client_id', client_secret='client_secret')
+        mock_spotify.assert_called_once()
+        assert integration.sp is not None
+
+
+@pytest.mark.unit
+class TestSpotifyIntegrationGetTrackInfo:
+    def test_get_track_info_success(self, spotify_integration):
+        spotify_integration.sp = MagicMock()
+        track_data = {'name': 'Test Track', 'id': 'abc123'}
+        spotify_integration.sp.track.return_value = track_data
+
+        result = spotify_integration.get_track_info('spotify:track:abc123')
+
+        assert result == track_data
+        spotify_integration.sp.track.assert_called_once_with('abc123')
+
+    def test_get_track_info_invalid_uri(self, spotify_integration):
+        spotify_integration.sp = MagicMock()
+
+        result = spotify_integration.get_track_info('invalid')
+
+        assert result is None
+        spotify_integration.sp.track.assert_not_called()
+
+    def test_get_track_info_wrong_type(self, spotify_integration):
+        spotify_integration.sp = MagicMock()
+
+        result = spotify_integration.get_track_info('spotify:playlist:abc123')
+
+        assert result is None
+        spotify_integration.sp.track.assert_not_called()
+
+    def test_get_track_info_api_error(self, spotify_integration):
+        spotify_integration.sp = MagicMock()
+        spotify_integration.sp.track.side_effect = Exception('API Error')
+
+        result = spotify_integration.get_track_info('spotify:track:abc123')
+
+        assert result is None
+
+
+@pytest.mark.unit
+class TestSpotifyIntegrationGetTracksFromCollection:
+    def test_get_playlist_tracks_success(self, spotify_integration):
+        spotify_integration.sp = MagicMock()
+        playlist_data = {
+            'tracks': {
+                'items': [
+                    {'track': {'name': 'Track 1', 'id': '1'}},
+                    {'track': {'name': 'Track 2', 'id': '2'}}
+                ],
+                'next': None
+            }
+        }
+        spotify_integration.sp.playlist.return_value = playlist_data
+
+        result = spotify_integration.get_playlist_tracks('spotify:playlist:abc123')
+
+        assert len(result) == 2
+        assert result[0]['name'] == 'Track 1'
+        assert result[1]['name'] == 'Track 2'
+
+    def test_get_playlist_tracks_invalid_uri(self, spotify_integration):
+        spotify_integration.sp = MagicMock()
+
+        result = spotify_integration.get_playlist_tracks('invalid')
+
+        assert result == []
+        spotify_integration.sp.playlist.assert_not_called()
+
+    def test_get_playlist_tracks_wrong_type(self, spotify_integration):
+        spotify_integration.sp = MagicMock()
+
+        result = spotify_integration.get_playlist_tracks('spotify:track:abc123')
+
+        assert result == []
+        spotify_integration.sp.playlist.assert_not_called()
+
+    def test_get_playlist_tracks_api_error(self, spotify_integration):
+        spotify_integration.sp = MagicMock()
+        spotify_integration.sp.playlist.side_effect = Exception('API Error')
+
+        result = spotify_integration.get_playlist_tracks('spotify:playlist:abc123')
+
+        assert result == []
+
+    def test_get_album_tracks_success(self, spotify_integration):
+        spotify_integration.sp = MagicMock()
+        album_data = {
+            'tracks': {
+                'items': [
+                    {'name': 'Track 1', 'id': '1'},
+                    {'name': 'Track 2', 'id': '2'}
+                ],
+                'next': None
+            }
+        }
+        spotify_integration.sp.album.return_value = album_data
+
+        result = spotify_integration.get_album_tracks('spotify:album:abc123')
+
+        assert len(result) == 2
+        assert result[0]['name'] == 'Track 1'
+
+    def test_get_album_tracks_invalid_uri(self, spotify_integration):
+        spotify_integration.sp = MagicMock()
+
+        result = spotify_integration.get_album_tracks('invalid')
+
+        assert result == []
+
+    def test_get_album_tracks_api_error(self, spotify_integration):
+        spotify_integration.sp = MagicMock()
+        spotify_integration.sp.album.side_effect = Exception('API Error')
+
+        result = spotify_integration.get_album_tracks('spotify:album:abc123')
+
+        assert result == []
+
+    def test_get_tracks_from_collection_empty_result(self, spotify_integration):
+        spotify_integration.sp = MagicMock()
+        spotify_integration.sp.playlist.return_value = None
+
+        result = spotify_integration.get_playlist_tracks('spotify:playlist:abc123')
+
+        assert result == []
+
+    def test_get_tracks_from_collection_unsupported_type(self, spotify_integration):
+        spotify_integration.sp = MagicMock()
+
+        result = spotify_integration._get_tracks_from_collection('spotify:artist:abc123', 'artist')
+
+        assert result == []
+
+
+@pytest.mark.unit
+class TestSpotifyIntegrationPagination:
+    def test_paginate_items_single_page(self, spotify_integration):
+        spotify_integration.sp = MagicMock()
+        initial_data = {
+            'tracks': {
+                'items': [
+                    {'track': {'name': 'Track 1'}},
+                    {'track': {'name': 'Track 2'}}
+                ],
+                'next': None
+            }
+        }
+
+        result = spotify_integration._paginate_items(initial_data, 'tracks')
+
+        assert len(result) == 2
+        assert result[0]['name'] == 'Track 1'
+
+    def test_paginate_items_multiple_pages(self, spotify_integration):
+        spotify_integration.sp = MagicMock()
+        page1 = {
+            'items': [
+                {'track': {'name': 'Track 1'}},
+                {'track': {'name': 'Track 2'}}
+            ],
+            'next': 'page2_url'
+        }
+        page2 = {
+            'items': [
+                {'track': {'name': 'Track 3'}}
+            ],
+            'next': None
+        }
+
+        initial_data = {'tracks': page1}
+        spotify_integration.sp.next.return_value = page2
+
+        result = spotify_integration._paginate_items(initial_data, 'tracks')
+
+        assert len(result) == 3
+        assert result[2]['name'] == 'Track 3'
+        spotify_integration.sp.next.assert_called_once()
+
+    def test_paginate_items_album_format(self, spotify_integration):
+        spotify_integration.sp = MagicMock()
+        initial_data = {
+            'tracks': {
+                'items': [
+                    {'name': 'Track 1'},
+                    {'name': 'Track 2'}
+                ],
+                'next': None
+            }
+        }
+
+        result = spotify_integration._paginate_items(initial_data, 'tracks')
+
+        assert len(result) == 2
+        assert result[0]['name'] == 'Track 1'
+
+    def test_paginate_items_skip_null_tracks(self, spotify_integration):
+        spotify_integration.sp = MagicMock()
+        initial_data = {
+            'tracks': {
+                'items': [
+                    {'track': {'name': 'Track 1'}},
+                    {'track': None},
+                    {'track': {'name': 'Track 2'}}
+                ],
+                'next': None
+            }
+        }
+
+        result = spotify_integration._paginate_items(initial_data, 'tracks')
+
+        assert len(result) == 2
+        assert result[0]['name'] == 'Track 1'
+        assert result[1]['name'] == 'Track 2'
+
+    def test_paginate_items_empty_items(self, spotify_integration):
+        spotify_integration.sp = MagicMock()
+        initial_data = {
+            'tracks': {
+                'items': [],
+                'next': None
+            }
+        }
+
+        result = spotify_integration._paginate_items(initial_data, 'tracks')
+
+        assert result == []
+
+    def test_paginate_items_no_tracks_key(self, spotify_integration):
+        spotify_integration.sp = MagicMock()
+        initial_data = {}
+
+        result = spotify_integration._paginate_items(initial_data, 'tracks')
+
+        assert result == []
