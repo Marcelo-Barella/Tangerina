@@ -12,16 +12,16 @@ help:
 	@echo "make clean             - Remove test artifacts"
 
 test:
-	cd deploy && docker-compose -f docker-compose.test.yml up --build --abort-on-container-exit tangerina-test
+	cd deploy && docker-compose --profile test up --build --abort-on-container-exit tangerina-test
 
 test-unit:
-	cd deploy && docker-compose -f docker-compose.test.yml --profile unit up --build --abort-on-container-exit tangerina-test-unit
+	cd deploy && docker-compose --profile test-unit up --build --abort-on-container-exit tangerina-test-unit
 
 test-integration:
-	cd deploy && docker-compose -f docker-compose.test.yml --profile integration up --build --abort-on-container-exit tangerina-test-integration
+	cd deploy && docker-compose --profile test-integration up --build --abort-on-container-exit tangerina-test-integration
 
 test-watch:
-	cd deploy && docker-compose -f docker-compose.test.yml --profile watch up --build tangerina-test-watch
+	cd deploy && docker-compose --profile test-watch up --build tangerina-test-watch
 
 test-coverage: test
 	@echo "Opening coverage report..."
@@ -34,9 +34,9 @@ test-coverage: test
 	fi
 
 test-build:
-	cd deploy && docker-compose -f docker-compose.test.yml build
+	cd deploy && docker-compose --profile test build
 
 clean:
 	rm -rf htmlcov/ .coverage coverage.xml .pytest_cache/
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-	cd deploy && docker-compose -f docker-compose.test.yml down -v
+	cd deploy && docker-compose --profile test --profile test-unit --profile test-integration --profile test-watch down -v 2>/dev/null || true

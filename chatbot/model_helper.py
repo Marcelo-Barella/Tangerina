@@ -204,11 +204,15 @@ def build_tools_schema() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "GET_MusicQueue",
-                "description": "Retorna a fila de músicas atual",
+                "description": "Retorna a fila de músicas atual com opções de filtragem e formatação",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "guild_id": {"type": "integer", "description": "ID do servidor Discord"}
+                        "guild_id": {"type": "integer", "description": "ID do servidor Discord"},
+                        "limit": {"type": "integer", "description": "Número máximo de itens da fila a retornar (padrão: todos)"},
+                        "info_level": {"type": "string", "enum": ["all", "name", "link", "minimal"], "description": "Nível de informação: 'all' (título, url, duração, artistas), 'name' (apenas título), 'link' (título e url), 'minimal' (título e posição)"},
+                        "offset": {"type": "integer", "description": "Posição inicial na fila para paginação (padrão: 0)"},
+                        "include_current": {"type": "boolean", "description": "Incluir música atual em reprodução (padrão: true)"}
                     },
                     "required": ["guild_id"]
                 }
@@ -298,11 +302,14 @@ def _normalize_integer_ids(tool_name: str, parameters: Dict[str, Any], tool_mapp
             normalized[param_name] = int(param_value)
         elif isinstance(param_value, str):
             try:
-                float_value = float(param_value)
-                if float_value.is_integer():
-                    normalized[param_name] = int(float_value)
+                normalized[param_name] = int(param_value)
             except (ValueError, OverflowError):
-                pass
+                try:
+                    float_value = float(param_value)
+                    if float_value.is_integer():
+                        normalized[param_name] = int(float_value)
+                except (ValueError, OverflowError):
+                    pass
     
     return normalized
 
@@ -420,7 +427,7 @@ class BaseChatbot(ABC):
             "MusicPause": lambda p, f: self._call_app_function("pause_music", f, int(p["guild_id"])),
             "MusicResume": lambda p, f: self._call_app_function("resume_music", f, int(p["guild_id"])),
             "MusicVolume": lambda p, f: self._call_app_function("set_volume", f, int(p["guild_id"]), int(p["volume"])),
-            "GET_MusicQueue": lambda p, f: self._call_app_function("get_queue", f, int(p["guild_id"])),
+            "GET_MusicQueue": self._handle_get_music_queue,
             "MusicSpotifyPlay": lambda p, f: self._call_app_function("play_spotify_music", f, int(p["guild_id"]), int(p["channel_id"]), str(p["spotify_uri"])),
             "MusicLeave": lambda p, f: self._call_app_function("leave_music", f, int(p["guild_id"])),
             "TTSSpeak": lambda p, f: self._call_app_function("speak_tts", f, int(p["guild_id"]), int(p["channel_id"]), str(p["text"])),
@@ -451,6 +458,15 @@ class BaseChatbot(ABC):
         if not guild:
             return {"success": False, "error": f"Guild {guild_id} not found"}
         return {"success": True, "channels": [{"id": ch.id, "name": ch.name, "type": str(ch.type)} for ch in guild.voice_channels]}
+
+    async def _handle_get_music_queue(self, parameters: Dict[str, Any], app_functions: Dict[str, Any]) -> Dict[str, Any]:
+        guild_id = int(parameters["guild_id"])
+        limit = parameters.get("limit")
+        info_level = parameters.get("info_level", "all")
+        offset = int(parameters.get("offset", 0))
+        include_current = parameters.get("include_current", True)
+        
+        return await self._call_app_function("get_queue", app_functions, guild_id, limit, info_level, offset, include_current)
 
     async def _handle_send_mensagem(self, parameters: Dict[str, Any], app_functions: Dict[str, Any]) -> Dict[str, Any]:
         if not self.bot:

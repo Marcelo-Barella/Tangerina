@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock
 from chatbot.memory_manager import MemoryManager
+from tests.conftest import EMBEDDING_DIM
 
 pytest_plugins = ('pytest_asyncio',)
 
@@ -220,7 +221,7 @@ async def test_similarity_threshold_filters_results(ephemeral_chromadb):
     from chatbot.memory_manager import MemoryManager
 
     embedding_service = AsyncMock()
-    embedding_service.embed_text = AsyncMock(side_effect=[[0.1] * 384, [0.9] * 384])
+    embedding_service.embed_text = AsyncMock(side_effect=[[0.1] * EMBEDDING_DIM, [0.9] * EMBEDDING_DIM])
 
     manager = MemoryManager(embedding_service=embedding_service)
     manager._client = ephemeral_chromadb

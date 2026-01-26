@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock, AsyncMock
+from tests.conftest import TEST_GUILD_ID, TEST_CHANNEL_ID, TEST_USER_ID
 
-def create_mock_guild(guild_id=123456789, name="Test Guild"):
+def create_mock_guild(guild_id=TEST_GUILD_ID, name="Test Guild"):
     guild = MagicMock()
     guild.id = guild_id
     guild.name = name
@@ -10,7 +11,7 @@ def create_mock_guild(guild_id=123456789, name="Test Guild"):
     guild.get_channel = MagicMock(return_value=None)
     return guild
 
-def create_mock_voice_channel(channel_id=987654321, name="Test Voice", guild=None):
+def create_mock_voice_channel(channel_id=TEST_CHANNEL_ID, name="Test Voice", guild=None):
     channel = MagicMock()
     channel.id = channel_id
     channel.name = name
@@ -31,7 +32,7 @@ def create_mock_text_channel(channel_id=111222333, name="Test Text", guild=None)
     channel.permissions_for = MagicMock(return_value=MagicMock(send_messages=True))
     return channel
 
-def create_mock_member(user_id=515664341194768385, name="TestUser", voice_channel=None):
+def create_mock_member(user_id=TEST_USER_ID, name="TestUser", voice_channel=None):
     member = MagicMock()
     member.id = user_id
     member.display_name = name
@@ -43,7 +44,7 @@ def create_mock_member(user_id=515664341194768385, name="TestUser", voice_channe
         member.voice = None
     return member
 
-def create_mock_voice_client(guild_id=123456789, channel=None):
+def create_mock_voice_client(guild_id=TEST_GUILD_ID, channel=None):
     vc = MagicMock()
     vc.guild = MagicMock()
     vc.guild.id = guild_id

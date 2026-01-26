@@ -4,3 +4,4 @@ pytest-cov>=4.1.0
 pytest-mock>=3.11.0
 pytest-flask>=1.2.0
 coverage>=7.0.0
+hypothesis>=6.0.0

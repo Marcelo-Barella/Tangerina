@@ -115,9 +115,9 @@ class VoiceCommandSink(BaseSink):
         if not self._health_monitor_started:
             self._start_health_monitor()
         try:
-            if user.id not in self.audio_buffers:
-                self.audio_buffers[user.id] = deque(maxlen=AUDIO_BUFFER_MAXLEN)
             if hasattr(data, 'pcm') and data.pcm:
+                if user.id not in self.audio_buffers:
+                    self.audio_buffers[user.id] = deque(maxlen=AUDIO_BUFFER_MAXLEN)
                 self.audio_buffers[user.id].append(data.pcm)
                 self.last_audio_timestamps[user.id] = time.time()
         except OpusError as e:
@@ -526,6 +526,7 @@ class VoiceCommandSink(BaseSink):
         if self._reconnection_task is not None and not self._reconnection_task.done():
             self._health_monitor_started = True
             return
+        self._health_monitor_started = True
         loop = None
         if hasattr(self, 'music_bot_ref') and self.music_bot_ref and hasattr(self.music_bot_ref, 'main_loop'):
             loop = self.music_bot_ref.main_loop
@@ -535,7 +536,6 @@ class VoiceCommandSink(BaseSink):
             async def start_monitor():
                 try:
                     self._reconnection_task = asyncio.create_task(self._check_connection_health())
-                    self._health_monitor_started = True
                 except Exception as e:
                     logger.error(f"Error starting health monitor: {e}")
             asyncio.run_coroutine_threadsafe(start_monitor(), loop)
@@ -543,7 +543,6 @@ class VoiceCommandSink(BaseSink):
             try:
                 current_loop = asyncio.get_running_loop()
                 self._reconnection_task = asyncio.create_task(self._check_connection_health())
-                self._health_monitor_started = True
             except RuntimeError:
                 pass
 

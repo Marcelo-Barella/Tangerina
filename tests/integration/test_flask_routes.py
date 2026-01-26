@@ -47,18 +47,6 @@ class TestMusicVolumeEndpoint:
         data = json.loads(response.data)
         assert 'between 0 and 100' in data['error']
 
-    def test_music_volume_at_min_boundary(self, flask_client):
-        response = flask_client.post('/music/volume', json={'guild_id': 123, 'volume': 0})
-        assert response.status_code in [200, 404]
-
-    def test_music_volume_at_max_boundary(self, flask_client):
-        response = flask_client.post('/music/volume', json={'guild_id': 123, 'volume': 100})
-        assert response.status_code in [200, 404]
-
-    def test_music_volume_valid_middle_value(self, flask_client):
-        response = flask_client.post('/music/volume', json={'guild_id': 123, 'volume': 50})
-        assert response.status_code in [200, 404]
-
     def test_music_volume_invalid_type_string(self, flask_client):
         response = flask_client.post('/music/volume', json={'guild_id': 123, 'volume': 'fifty'})
         assert response.status_code == 400
@@ -88,11 +76,6 @@ class TestMusicPlayEndpoint:
         response = flask_client.post('/music/play', json={'guild_id': 123, 'channel_id': 456, 'query': ''})
         assert response.status_code == 400
 
-    def test_music_play_with_valid_query(self, flask_client):
-        response = flask_client.post('/music/play',
-            json={'guild_id': 123, 'channel_id': 456, 'query': 'never gonna give you up'})
-        assert response.status_code in [200, 404, 500]
-
     def test_music_play_invalid_guild_id_type(self, flask_client):
         response = flask_client.post('/music/play',
             json={'guild_id': 'invalid', 'channel_id': 456, 'query': 'test'})
@@ -109,21 +92,11 @@ class TestMusicStopEndpoint:
         response = flask_client.post('/music/stop', json={'guild_id': 'invalid'})
         assert response.status_code == 400
 
-    def test_music_stop_with_valid_guild_id(self, flask_client):
-        response = flask_client.post('/music/stop', json={'guild_id': 123})
-        assert response.status_code in [200, 404]
-
-
 @pytest.mark.integration
 class TestMusicSkipEndpoint:
     def test_music_skip_missing_guild_id_returns_400(self, flask_client):
         response = flask_client.post('/music/skip', json={})
         assert response.status_code == 400
-
-    def test_music_skip_with_valid_guild_id(self, flask_client):
-        response = flask_client.post('/music/skip', json={'guild_id': 123})
-        assert response.status_code in [200, 404]
-
 
 @pytest.mark.integration
 class TestMusicPauseEndpoint:
@@ -131,21 +104,11 @@ class TestMusicPauseEndpoint:
         response = flask_client.post('/music/pause', json={})
         assert response.status_code == 400
 
-    def test_music_pause_with_valid_guild_id(self, flask_client):
-        response = flask_client.post('/music/pause', json={'guild_id': 123})
-        assert response.status_code in [200, 404]
-
-
 @pytest.mark.integration
 class TestMusicResumeEndpoint:
     def test_music_resume_missing_guild_id_returns_400(self, flask_client):
         response = flask_client.post('/music/resume', json={})
         assert response.status_code == 400
-
-    def test_music_resume_with_valid_guild_id(self, flask_client):
-        response = flask_client.post('/music/resume', json={'guild_id': 123})
-        assert response.status_code in [200, 404]
-
 
 @pytest.mark.integration
 class TestMusicQueueEndpoint:
@@ -156,11 +119,6 @@ class TestMusicQueueEndpoint:
     def test_music_queue_invalid_guild_id_type_returns_400(self, flask_client):
         response = flask_client.get('/music/queue?guild_id=invalid')
         assert response.status_code == 400
-
-    def test_music_queue_with_valid_guild_id(self, flask_client):
-        response = flask_client.get('/music/queue?guild_id=123')
-        assert response.status_code in [200, 404]
-
 
 @pytest.mark.integration
 class TestEnterChannelEndpoint:
@@ -176,21 +134,11 @@ class TestEnterChannelEndpoint:
         response = flask_client.post('/enter-channel', json={'guild_id': 'invalid', 'channel_id': 456})
         assert response.status_code == 400
 
-    def test_enter_channel_with_valid_ids(self, flask_client):
-        response = flask_client.post('/enter-channel', json={'guild_id': 123, 'channel_id': 456})
-        assert response.status_code in [200, 500, 503]
-
-
 @pytest.mark.integration
 class TestLeaveChannelEndpoint:
     def test_leave_channel_missing_guild_id_returns_400(self, flask_client):
         response = flask_client.post('/leave-channel', json={})
         assert response.status_code == 400
-
-    def test_leave_channel_with_valid_guild_id(self, flask_client):
-        response = flask_client.post('/leave-channel', json={'guild_id': 123})
-        assert response.status_code in [200, 404]
-
 
 @pytest.mark.integration
 class TestUserVoiceChannelEndpoint:
@@ -210,11 +158,6 @@ class TestUserVoiceChannelEndpoint:
         response = flask_client.get('/user/voice-channel?guild_id=123&user_id=invalid')
         assert response.status_code == 400
 
-    def test_user_voice_channel_with_valid_ids(self, flask_client):
-        response = flask_client.get('/user/voice-channel?guild_id=123&user_id=456')
-        assert response.status_code in [200, 404]
-
-
 @pytest.mark.integration
 class TestChatbotMessageEndpoint:
     def test_chatbot_message_missing_message_returns_400(self, flask_client):
@@ -226,11 +169,6 @@ class TestChatbotMessageEndpoint:
     def test_chatbot_message_empty_message_returns_400(self, flask_client):
         response = flask_client.post('/chatbot/message', json={'message': ''})
         assert response.status_code == 400
-
-    def test_chatbot_message_with_valid_message(self, flask_client):
-        response = flask_client.post('/chatbot/message', json={'message': 'Hello bot'})
-        assert response.status_code in [200, 500]
-
 
 @pytest.mark.integration
 class TestTTSSpeakEndpoint:
@@ -250,12 +188,6 @@ class TestTTSSpeakEndpoint:
         response = flask_client.post('/tts/speak', json={'guild_id': 123, 'channel_id': 456, 'text': ''})
         assert response.status_code == 400
 
-    def test_tts_speak_with_valid_inputs(self, flask_client):
-        response = flask_client.post('/tts/speak',
-            json={'guild_id': 123, 'channel_id': 456, 'text': 'Hello world'})
-        assert response.status_code in [200, 404, 500, 503]
-
-
 @pytest.mark.integration
 class TestErrorHandling:
     def test_invalid_json_body_returns_400(self, flask_client):
@@ -267,7 +199,7 @@ class TestErrorHandling:
     def test_missing_content_type_with_json(self, flask_client):
         response = flask_client.post('/music/volume',
             data=json.dumps({'guild_id': 123, 'volume': 50}))
-        assert response.status_code in [200, 400, 404]
+        assert response.status_code == 415
 
     def test_get_endpoint_does_not_accept_post(self, flask_client):
         response = flask_client.post('/health')

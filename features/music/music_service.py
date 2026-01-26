@@ -184,10 +184,58 @@ class MusicService:
             return {'success': True, 'volume': volume, 'message': f'Volume set to {volume}%'}
         return {'success': False, 'error': 'Cannot adjust volume'}
 
-    async def get_queue(self, guild_id: int) -> Dict[str, Any]:
+    async def get_queue(self, guild_id: int, limit: Optional[int] = None, 
+                       info_level: str = "all", offset: int = 0, 
+                       include_current: bool = True) -> Dict[str, Any]:
+        queue = self.music_bot.queues.get(guild_id, [])
+        current = self.music_bot.current_songs.get(guild_id)
+        total = len(queue)
+        
+        if limit == 0:
+            filtered_queue = []
+        else:
+            start_idx = offset
+            end_idx = start_idx + limit if limit else len(queue)
+            filtered_queue = queue[start_idx:end_idx]
+        
+        def extract_fields(item: Dict[str, Any], position: Optional[int] = None) -> Dict[str, Any]:
+            if info_level == "minimal":
+                result = {"title": item.get("title", "Unknown")}
+                if position is not None:
+                    result["position"] = position
+                return result
+            elif info_level == "name":
+                return {"title": item.get("title", "Unknown")}
+            elif info_level == "link":
+                result = {"title": item.get("title", "Unknown")}
+                url = item.get("url") or item.get("webpage_url")
+                if url:
+                    result["url"] = url
+                return result
+            else:
+                result = {"title": item.get("title", "Unknown")}
+                url = item.get("url") or item.get("webpage_url")
+                if url:
+                    result["url"] = url
+                if "duration" in item:
+                    result["duration"] = item["duration"]
+                if "artists" in item:
+                    result["artists"] = item["artists"]
+                return result
+        
+        processed_queue = []
+        for idx, item in enumerate(filtered_queue):
+            processed_queue.append(extract_fields(item, offset + idx))
+        
+        processed_current = None
+        if include_current and current:
+            processed_current = extract_fields(current)
+        
         return {
-            'queue': self.music_bot.queues.get(guild_id, []),
-            'current': self.music_bot.current_songs.get(guild_id)
+            'queue': processed_queue,
+            'current': processed_current,
+            'total': total,
+            'returned': len(processed_queue)
         }
 
     async def leave_music(self, guild_id: int) -> Dict[str, Any]:

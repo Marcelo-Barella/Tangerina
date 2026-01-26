@@ -101,6 +101,83 @@ services:
       retries: 3
       start_period: 40s
 
+  tangerina-test:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: tangerina-test
+    environment:
+      - PYTHONPATH=/app
+      - DISCORD_TOKEN=test_token_not_used
+      - ZHIPUAI_API_KEY=test_key_not_used
+    volumes:
+      - ../tests:/app/tests
+      - ../htmlcov:/app/htmlcov
+    networks:
+      - tangerina-network
+    command: >
+      pytest tests/
+      -v
+      --cov=chatbot
+      --cov=features
+      --cov=flask_routes
+      --cov-report=term
+      --cov-report=html
+      --cov-report=xml
+      --cov-fail-under=70
+    profiles:
+      - test
+
+  tangerina-test-unit:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: tangerina-test-unit
+    environment:
+      - PYTHONPATH=/app
+    volumes:
+      - ../tests:/app/tests
+    networks:
+      - tangerina-network
+    command: pytest tests/unit/ -v -m unit
+    profiles:
+      - test-unit
+
+  tangerina-test-integration:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: tangerina-test-integration
+    environment:
+      - PYTHONPATH=/app
+      - DISCORD_TOKEN=test_token_not_used
+      - ZHIPUAI_API_KEY=test_key_not_used
+    volumes:
+      - ../tests:/app/tests
+    networks:
+      - tangerina-network
+    command: pytest tests/integration/ -v -m integration
+    profiles:
+      - test-integration
+
+  tangerina-test-watch:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: tangerina-test-watch
+    environment:
+      - PYTHONPATH=/app
+    volumes:
+      - ../tests:/app/tests
+      - ../chatbot:/app/chatbot
+      - ../features:/app/features
+      - ../flask_routes.py:/app/flask_routes.py
+    networks:
+      - tangerina-network
+    command: pytest tests/ -v --cov=chatbot --cov=features --cov=flask_routes -f
+    profiles:
+      - test-watch
+
 networks:
   tangerina-network:
     driver: bridge

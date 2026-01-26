@@ -942,3 +942,47 @@ Todas as variáveis de ambiente definidas no arquivo `.env` na raiz do projeto s
 ### Rede
 
 Todos os serviços estão conectados à rede `tangerina-network`, permitindo comunicação entre eles.
+
+## Test Suite
+
+O projeto inclui uma suíte de testes automatizada executada via Docker usando o mesmo container da aplicação principal. Os testes são organizados em testes unitários e de integração, com cobertura de código exigida de pelo menos 70%.
+
+### Executando Testes
+
+Use o script `test.sh` na raiz do projeto para executar os testes:
+
+```bash
+./test.sh [comando]
+```
+
+**Comandos disponíveis:**
+
+- `all` (padrão) - Executa todos os testes com cobertura
+- `unit` - Executa apenas testes unitários (rápido)
+- `integration` - Executa apenas testes de integração
+- `watch` - Executa testes em modo fail-fast (não é file-watching, apenas pytest com `-f`)
+- `coverage` - Executa testes e abre o relatório HTML de cobertura
+- `clean` - Remove artefatos de teste e limpa containers Docker
+
+Os testes são executados usando o mesmo Dockerfile e imagem da aplicação principal, eliminando a necessidade de um container separado e reduzindo o uso de recursos e tempo de deployment.
+
+### Cobertura de Código
+
+- **Requisito mínimo:** 70% de cobertura de linha para `chatbot`, `features` e `flask_routes`
+- **CI:** GitHub Actions verifica automaticamente o threshold de 70%
+- **Local:** `./test.sh all` e `./test.sh coverage` também falham se a cobertura estiver abaixo de 70%
+- **Relatório HTML:** Gerado em `htmlcov/index.html` após executar `./test.sh coverage`
+
+### Estrutura de Testes
+
+- **Testes unitários:** `tests/unit/` - Testes de lógica pura com mocks
+- **Testes de integração:** `tests/integration/` - Testes com dependências reais (ex: ChromaDB)
+
+### Marcadores pytest
+
+Os testes usam marcadores para categorização:
+
+- `@pytest.mark.unit` - Testes unitários
+- `@pytest.mark.integration` - Testes de integração
+- `@pytest.mark.chromadb` - Testes que usam ChromaDB
+- `@pytest.mark.slow` - Testes lentos

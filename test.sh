@@ -7,29 +7,30 @@ cd "$(dirname "$0")"
 case "${1:-all}" in
     all)
         echo "Running all tests with coverage..."
-        (cd deploy && docker-compose -f docker-compose.test.yml down --remove-orphans 2>/dev/null || true)
-        cd deploy && docker-compose -f docker-compose.test.yml up --build --abort-on-container-exit tangerina-test
+        (cd deploy && docker-compose --profile test down --remove-orphans 2>/dev/null || true)
+        cd deploy && docker-compose --profile test up --build --abort-on-container-exit tangerina-test
         ;;
     unit)
         echo "Running unit tests..."
-        (cd deploy && docker-compose -f docker-compose.test.yml down --remove-orphans 2>/dev/null || true)
-        cd deploy && docker-compose -f docker-compose.test.yml --profile unit up --build --abort-on-container-exit tangerina-test-unit
+        (cd deploy && docker-compose --profile test-unit down --remove-orphans 2>/dev/null || true)
+        cd deploy && docker-compose --profile test-unit up --build --abort-on-container-exit tangerina-test-unit
         ;;
     integration)
         echo "Running integration tests..."
-        (cd deploy && docker-compose -f docker-compose.test.yml down --remove-orphans 2>/dev/null || true)
-        cd deploy && docker-compose -f docker-compose.test.yml --profile integration up --build --abort-on-container-exit tangerina-test-integration
+        (cd deploy && docker-compose --profile test-integration down --remove-orphans 2>/dev/null || true)
+        cd deploy && docker-compose --profile test-integration up --build --abort-on-container-exit tangerina-test-integration
         ;;
     watch)
         echo "Running tests in watch mode (Ctrl+C to stop)..."
-        (cd deploy && docker-compose -f docker-compose.test.yml down --remove-orphans 2>/dev/null || true)
-        cd deploy && docker-compose -f docker-compose.test.yml --profile watch up --build tangerina-test-watch
+        (cd deploy && docker-compose --profile test-watch down --remove-orphans 2>/dev/null || true)
+        cd deploy && docker-compose --profile test-watch up --build tangerina-test-watch
         ;;
     coverage)
         echo "Running tests and generating coverage report..."
-        (cd deploy && docker-compose -f docker-compose.test.yml down --remove-orphans 2>/dev/null || true)
-        cd deploy && docker-compose -f docker-compose.test.yml up --build --abort-on-container-exit tangerina-test
+        (cd deploy && docker-compose --profile test down --remove-orphans 2>/dev/null || true)
+        cd deploy && docker-compose --profile test up --build --abort-on-container-exit tangerina-test
         echo "Opening coverage report..."
+        cd ..
         if command -v xdg-open > /dev/null; then
             xdg-open htmlcov/index.html
         elif command -v open > /dev/null; then
@@ -42,7 +43,7 @@ case "${1:-all}" in
         echo "Cleaning test artifacts..."
         rm -rf htmlcov/ .coverage coverage.xml .pytest_cache/
         find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-        cd deploy && docker-compose -f docker-compose.test.yml down -v
+        cd deploy && docker-compose --profile test --profile test-unit --profile test-integration --profile test-watch down -v 2>/dev/null || true
         echo "Cleanup complete!"
         ;;
     *)

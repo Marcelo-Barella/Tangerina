@@ -81,44 +81,44 @@ class MemoryManager:
         
         try:
             document = f"User: {user_message} Bot: {bot_response}"
-            embedding = await self.embedding_service.embed_text(document)
-            
-            if not embedding:
-                logger.warning("Failed to generate embedding, skipping storage")
-                return
-            
             metadata = {
-                "guild_id": str(guild_id) if guild_id else None,
+                "guild_id": str(guild_id) if guild_id is not None else "none",
                 "channel_id": str(channel_id),
                 "user_id": str(user_id),
                 "timestamp": datetime.utcnow().isoformat(),
                 "message_type": "conversation",
             }
-            
+
             if tool_calls:
                 metadata["tool_calls"] = str(len(tool_calls))
-            
-            doc_id = str(uuid.uuid4())
-            
-            self._collection.add(
-                ids=[doc_id],
-                embeddings=[embedding],
-                documents=[document],
-                metadatas=[metadata]
-            )
-            
-            logger.debug(f"Stored conversation memory: {doc_id}")
-            
+
             conversation_key = self._get_conversation_key(guild_id, channel_id, user_id)
             if conversation_key not in self.recent_interactions:
                 self.recent_interactions[conversation_key] = deque(maxlen=self.recent_buffer_size)
-            
+
             self.recent_interactions[conversation_key].append({
                 "user_message": user_message,
                 "bot_response": bot_response,
                 "timestamp": metadata["timestamp"],
                 "metadata": metadata
             })
+
+            embedding = await self.embedding_service.embed_text(document)
+
+            if not embedding:
+                logger.warning("Failed to generate embedding, skipping vector storage")
+                return
+
+            doc_id = str(uuid.uuid4())
+
+            self._collection.add(
+                ids=[doc_id],
+                embeddings=[embedding],
+                documents=[document],
+                metadatas=[metadata]
+            )
+
+            logger.debug(f"Stored conversation memory: {doc_id}")
         except Exception as e:
             logger.error(f"Error storing conversation: {e}", exc_info=True)
             raise
@@ -172,8 +172,10 @@ class MemoryManager:
                 {"channel_id": str(channel_id)},
                 {"user_id": str(user_id)}
             ]
-            if guild_id:
+            if guild_id is not None:
                 conditions.append({"guild_id": str(guild_id)})
+            else:
+                conditions.append({"guild_id": "none"})
             where_clause = {"$and": conditions}
             
             results = self._collection.query(

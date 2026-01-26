@@ -151,6 +151,73 @@ class TestNormalizeIntegerIds:
         result = _normalize_integer_ids('MusicPlay', params, tool_mapping)
         assert result['guild_id'] == 123
         assert isinstance(result['guild_id'], int)
+    
+    def test_normalize_integer_ids_handles_unicode_in_string_parameters(self):
+        tool_mapping = {
+            'MusicPlay': {
+                'properties': {
+                    'query': {'type': 'string'},
+                    'guild_id': {'type': 'integer'}
+                }
+            }
+        }
+        params = {
+            'guild_id': 123,
+            'query': 'Música com acentos: café, coração, ação'
+        }
+        result = _normalize_integer_ids('MusicPlay', params, tool_mapping)
+        assert result['query'] == 'Música com acentos: café, coração, ação'
+        assert result['guild_id'] == 123
+    
+    def test_normalize_integer_ids_handles_unicode_emojis_in_string_parameters(self):
+        tool_mapping = {
+            'SEND_Mensagem': {
+                'properties': {
+                    'text': {'type': 'string'},
+                    'channel_id': {'type': 'integer'}
+                }
+            }
+        }
+        params = {
+            'channel_id': 456,
+            'text': 'Hello 🌟 World 🎵 Test 🎶'
+        }
+        result = _normalize_integer_ids('SEND_Mensagem', params, tool_mapping)
+        assert result['text'] == 'Hello 🌟 World 🎵 Test 🎶'
+        assert result['channel_id'] == 456
+    
+    def test_normalize_integer_ids_handles_extremely_large_guild_id(self):
+        tool_mapping = {
+            'MusicPlay': {
+                'properties': {
+                    'guild_id': {'type': 'integer'},
+                    'channel_id': {'type': 'integer'}
+                }
+            }
+        }
+        max_int64 = 2**63 - 1
+        params = {
+            'guild_id': max_int64,
+            'channel_id': 456,
+            'query': 'test'
+        }
+        result = _normalize_integer_ids('MusicPlay', params, tool_mapping)
+        assert result['guild_id'] == max_int64
+        assert isinstance(result['guild_id'], int)
+    
+    def test_normalize_integer_ids_handles_extremely_large_guild_id_as_string(self):
+        tool_mapping = {
+            'MusicPlay': {
+                'properties': {
+                    'guild_id': {'type': 'integer'}
+                }
+            }
+        }
+        max_int64 = 2**63 - 1
+        params = {'guild_id': str(max_int64)}
+        result = _normalize_integer_ids('MusicPlay', params, tool_mapping)
+        assert result['guild_id'] == max_int64
+        assert isinstance(result['guild_id'], int)
 
 
 @pytest.mark.unit
@@ -211,6 +278,24 @@ class TestNormalizeContext:
         ]
         result = normalize_context(context)
         assert len(result) == 2
+    
+    def test_normalize_context_handles_more_than_10_empty_messages(self):
+        context = [{'content': ''} for _ in range(15)]
+        result = normalize_context(context)
+        assert len(result) == 0
+        assert result == []
+    
+    def test_normalize_context_handles_more_than_10_whitespace_only_messages(self):
+        context = [{'content': '   '} for _ in range(12)]
+        result = normalize_context(context)
+        assert len(result) == 0
+        assert result == []
+    
+    def test_normalize_context_handles_mixed_empty_and_valid_messages_over_10(self):
+        context = [{'content': ''} for _ in range(8)] + [{'content': f'valid {i}'} for i in range(5)]
+        result = normalize_context(context)
+        assert len(result) == 5
+        assert all('valid' in msg['content'] for msg in result)
 
 
 @pytest.mark.unit
@@ -343,3 +428,28 @@ class TestBaseChatbotBuildToolMessage:
     def test_build_tool_message_omits_tool_call_id_when_none(self, test_chatbot):
         result = test_chatbot._build_tool_message('TestTool', {'success': True})
         assert 'tool_call_id' not in result
+    
+    def test_validate_parameters_handles_unicode_in_query(self, test_chatbot):
+        valid, error = test_chatbot._validate_parameters(
+            'MusicPlay',
+            {'guild_id': 123, 'channel_id': 456, 'query': 'Música: café e coração'}
+        )
+        assert valid
+        assert error is None
+    
+    def test_validate_parameters_handles_unicode_emojis_in_text(self, test_chatbot):
+        valid, error = test_chatbot._validate_parameters(
+            'SEND_Mensagem',
+            {'channel_id': 123, 'text': 'Hello 🌟 World 🎵'}
+        )
+        assert valid
+        assert error is None
+    
+    def test_validate_parameters_handles_extremely_large_guild_id(self, test_chatbot):
+        max_int64 = 2**63 - 1
+        valid, error = test_chatbot._validate_parameters(
+            'MusicPlay',
+            {'guild_id': max_int64, 'channel_id': 456, 'query': 'test'}
+        )
+        assert valid
+        assert error is None
