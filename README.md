@@ -1,5 +1,7 @@
 # Tangerina Discord Bot
 
+[![Tests](https://github.com/Marcelo-Barella/Tangerina/actions/workflows/test.yml/badge.svg)](https://github.com/Marcelo-Barella/Tangerina/actions/workflows/test.yml)
+
 Sistema de bot do Discord inteligente com suporte a múltiplos provedores de IA (ZhipuAI GLM, OpenAI GPT, Google Gemini), com capacidades de chamada de funções para controle de música, voz e interações Discord.
 
 ## Requisitos

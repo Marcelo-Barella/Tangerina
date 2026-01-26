@@ -9,6 +9,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       matrix:
         python-version: ['3.10', '3.11', '3.12']
@@ -17,17 +18,27 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
 
-    - name: Cache dependencies
-      uses: actions/cache@v3
+    - name: Cache pip dependencies
+      uses: actions/cache@v4
       with:
         path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}-${{ hashFiles('requirements-test.txt') }}
+        key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('requirements.txt') }}-${{ hashFiles('requirements-test.txt') }}
         restore-keys: |
+          ${{ runner.os }}-pip-${{ matrix.python-version }}-
           ${{ runner.os }}-pip-
+
+    - name: Cache pytest cache
+      uses: actions/cache@v4
+      with:
+        path: .pytest_cache
+        key: ${{ runner.os }}-pytest-${{ matrix.python-version }}-${{ hashFiles('**/test_*.py') }}
+        restore-keys: |
+          ${{ runner.os }}-pytest-${{ matrix.python-version }}-
+          ${{ runner.os }}-pytest-
 
     - name: Install dependencies
       run: |
@@ -36,6 +47,8 @@ jobs:
         pip install -r requirements-test.txt
 
     - name: Run tests with coverage
+      id: test
+      timeout-minutes: 10
       run: |
         pytest tests/ \
           --cov=chatbot \
@@ -43,18 +56,73 @@ jobs:
           --cov=flask_routes \
           --cov-report=xml \
           --cov-report=term \
+          --json-report \
+          --json-report-file=test-results.json \
+          --junitxml=junit.xml \
           -v
 
+    - name: Publish test results
+      if: always()
+      uses: EnricoMi/publish-unit-test-result-action@v2
+      with:
+        files: junit.xml
+        check_name: Test Results (Python ${{ matrix.python-version }})
+        report_individual_runs: true
+        fail_on: errors
+
+    - name: Generate test summary
+      if: always()
+      run: |
+        if [ -f test-results.json ]; then
+          echo "## Test Summary (Python ${{ matrix.python-version }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          python3 << 'EOF'
+        import json
+        import sys
+        
+        try:
+            with open('test-results.json', 'r') as f:
+                data = json.load(f)
+            
+            summary = data.get('summary', {})
+            total = summary.get('total', 0)
+            passed = summary.get('passed', 0)
+            failed = summary.get('failed', 0)
+            skipped = summary.get('skipped', 0)
+            error = summary.get('error', 0)
+            duration = summary.get('duration', 0)
+            
+            print(f"- **Total:** {total}")
+            print(f"- **Passed:** {passed} :white_check_mark:")
+            print(f"- **Failed:** {failed} :x:")
+            print(f"- **Skipped:** {skipped}")
+            print(f"- **Error:** {error} :warning:")
+            print(f"- **Duration:** {duration:.2f}s")
+            
+            if failed > 0 or error > 0:
+                sys.exit(1)
+        except Exception as e:
+            print(f"Error generating summary: {e}")
+            sys.exit(1)
+        EOF
+        else
+          echo "## Test Summary (Python ${{ matrix.python-version }})" >> $GITHUB_STEP_SUMMARY
+          echo "No test results found" >> $GITHUB_STEP_SUMMARY
+        fi
+
     - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v3
+      if: always()
+      continue-on-error: true
+      uses: codecov/codecov-action@v4
       with:
         files: ./coverage.xml
         flags: unittests
         name: codecov-umbrella
+        fail_ci_if_error: false
 
     - name: Check coverage threshold
       run: |
-        coverage report --fail-under=70
+        coverage report --fail-under=70 || (echo "Coverage below 70% threshold" && exit 1)
 
     - name: Generate coverage HTML report
       if: always()
@@ -63,7 +131,8 @@ jobs:
 
     - name: Upload coverage HTML
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: coverage-report-${{ matrix.python-version }}
         path: htmlcov/
+        retention-days: 7
