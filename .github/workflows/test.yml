@@ -10,6 +10,9 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      checks: write
+      contents: read
     strategy:
       matrix:
         python-version: ['3.10', '3.11', '3.12']
