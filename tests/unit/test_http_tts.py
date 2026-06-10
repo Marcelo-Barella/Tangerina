@@ -6,7 +6,7 @@ from features.tts.http_tts import HttpTTSClient
 
 
 @pytest.mark.unit
-class TestOmnivoiceHttpTTSClient:
+class TestHttpTTSClient:
     def test_init_requires_api_url(self):
         with pytest.raises(RuntimeError, match="OmniVoice API URL is required"):
             HttpTTSClient("", 90, "OmniVoice")
