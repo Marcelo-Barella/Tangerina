@@ -5,6 +5,7 @@ flask>=3.0.0
 PyNaCl>=1.5.0
 yt-dlp
 elevenlabs
+requests>=2.31.0
 audioop-lts; python_version >= '3.13'
 discord-ext-voice-recv>=0.5.1a170
 openai>=1.0.0

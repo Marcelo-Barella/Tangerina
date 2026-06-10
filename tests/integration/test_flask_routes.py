@@ -189,6 +189,24 @@ class TestTTSSpeakEndpoint:
         assert response.status_code == 400
 
 @pytest.mark.integration
+class TestOmnivoiceSpeakEndpoint:
+    def test_tts_omnivoice_speak_missing_guild_id_returns_400(self, flask_client):
+        response = flask_client.post('/tts/omnivoice/speak', json={'channel_id': 456, 'text': 'test'})
+        assert response.status_code == 400
+
+    def test_tts_omnivoice_speak_missing_channel_id_returns_400(self, flask_client):
+        response = flask_client.post('/tts/omnivoice/speak', json={'guild_id': 123, 'text': 'test'})
+        assert response.status_code == 400
+
+    def test_tts_omnivoice_speak_missing_text_returns_400(self, flask_client):
+        response = flask_client.post('/tts/omnivoice/speak', json={'guild_id': 123, 'channel_id': 456})
+        assert response.status_code == 400
+
+    def test_tts_omnivoice_speak_empty_text_returns_400(self, flask_client):
+        response = flask_client.post('/tts/omnivoice/speak', json={'guild_id': 123, 'channel_id': 456, 'text': ''})
+        assert response.status_code == 400
+
+@pytest.mark.integration
 class TestErrorHandling:
     def test_invalid_json_body_returns_400(self, flask_client):
         response = flask_client.post('/music/volume',

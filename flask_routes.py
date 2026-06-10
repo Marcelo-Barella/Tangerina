@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from flask import Flask, request, jsonify
 from features.music.music_service import MusicService
 from features.music.music_bot import MusicBot
@@ -10,7 +11,15 @@ VOLUME_MIN = 0
 VOLUME_MAX = 100
 
 
-def create_flask_app(bot, music_bot: MusicBot, music_service: MusicService, chatbot, speak_tts_func, speak_piper_tts_func):
+def create_flask_app(
+    bot,
+    music_bot: MusicBot,
+    music_service: MusicService,
+    chatbot,
+    speak_tts_func,
+    speak_piper_tts_func,
+    speak_omnivoice_tts_func=None,
+):
     flask_app = Flask(__name__)
     bot_loop = None
 
@@ -216,7 +225,12 @@ def create_flask_app(bot, music_bot: MusicBot, music_service: MusicService, chat
         if not text:
             return jsonify({'error': 'text is required'}), 400
 
-        tts_response = run_async(speak_tts_func(guild_id, channel_id, text), timeout=30)
+        speak_timeout = (
+            int(os.getenv('OMNIVOICE_TIMEOUT', '90'))
+            if os.getenv('TTS_PROVIDER', 'elevenlabs') == 'omnivoice'
+            else 30
+        )
+        tts_response = run_async(speak_tts_func(guild_id, channel_id, text), timeout=speak_timeout)
         return jsonify(tts_response), 200 if tts_response.get('success') else 500
 
     @flask_app.route('/tts/piper/speak', methods=['POST'])
@@ -233,6 +247,28 @@ def create_flask_app(bot, music_bot: MusicBot, music_service: MusicService, chat
 
         piper_response = run_async(speak_piper_tts_func(guild_id, channel_id, text), timeout=30)
         return jsonify(piper_response), 200 if piper_response.get('success') else 500
+
+    @flask_app.route('/tts/omnivoice/speak', methods=['POST'])
+    @require_bot_ready
+    def tts_omnivoice_speak():
+        if not speak_omnivoice_tts_func:
+            return jsonify({'error': 'OmniVoice TTS route not configured'}), 503
+
+        request_data = request.get_json() or {}
+        guild_id, channel_id = parse_guild_channel_ids(request_data)
+        if guild_id is None or channel_id is None:
+            return jsonify({'error': 'guild_id and channel_id must be integers'}), 400
+
+        text = request_data.get('text')
+        if not text:
+            return jsonify({'error': 'text is required'}), 400
+
+        omnivoice_timeout = int(os.getenv('OMNIVOICE_TIMEOUT', '90'))
+        omnivoice_response = run_async(
+            speak_omnivoice_tts_func(guild_id, channel_id, text),
+            timeout=omnivoice_timeout,
+        )
+        return jsonify(omnivoice_response), 200 if omnivoice_response.get('success') else 500
 
     @flask_app.route('/chatbot/message', methods=['POST'])
     @require_bot_ready

@@ -252,7 +252,7 @@ def build_tools_schema() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "TTSSpeak",
-                "description": "Fala um texto usando síntese de voz (TTS) via ElevenLabs",
+                "description": "Fala um texto usando síntese de voz (TTS) via ElevenLabs, Piper ou OmniVoice",
                 "parameters": {
                     "type": "object",
                     "properties": {
