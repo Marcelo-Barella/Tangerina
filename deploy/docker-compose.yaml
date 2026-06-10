@@ -80,13 +80,6 @@ services:
       - omnivoice_cache:/app/cache/huggingface
     networks:
       - tangerina-network
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5003/health"]
       interval: 30s

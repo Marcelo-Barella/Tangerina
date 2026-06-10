@@ -22,8 +22,15 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 _model_state: Optional[Dict[str, Any]] = None
+_model_ready = False
 _model_lock = threading.Lock()
 _load_error: Optional[str] = None
+
+
+class InferenceTimeout(TimeoutError):
+    def __init__(self, thread: threading.Thread) -> None:
+        super().__init__("TTS generation timed out")
+        self.thread = thread
 
 
 def sanitize_text(text: str) -> str:
@@ -50,18 +57,20 @@ def sanitize_text(text: str) -> str:
 
 
 def _warmup_model() -> None:
-    global _model_state, _load_error
+    global _model_state, _model_ready, _load_error
     try:
         _model_state = load_omnivoice_model()
         instruct = os.getenv("OMNIVOICE_INSTRUCT", "female, brazilian accent")
         model = _model_state["model"]
         logger.info("Warming up OmniVoice with voice design instruct=%r", instruct)
-        model.generate(
-            text="warmup",
-            instruct=instruct,
-            num_step=int(os.getenv("OMNIVOICE_NUM_STEP", "16")),
-            speed=float(os.getenv("OMNIVOICE_SPEED", "1.0")),
-        )
+        with _model_lock:
+            model.generate(
+                text="warmup",
+                instruct=instruct,
+                num_step=int(os.getenv("OMNIVOICE_NUM_STEP", "16")),
+                speed=float(os.getenv("OMNIVOICE_SPEED", "1.0")),
+            )
+        _model_ready = True
         logger.info("OmniVoice warmup complete")
     except Exception as exc:
         _load_error = str(exc)
@@ -71,6 +80,8 @@ def _warmup_model() -> None:
 def _get_model_state() -> Dict[str, Any]:
     if _model_state is None:
         raise RuntimeError(_load_error or "Model is not loaded yet")
+    if not _model_ready:
+        raise RuntimeError("Model is still warming up")
     return _model_state
 
 
@@ -121,7 +132,7 @@ def _generate_audio_timed(text: str):
     thread.start()
     thread.join(_inference_timeout_seconds())
     if thread.is_alive():
-        raise TimeoutError("TTS generation timed out")
+        raise InferenceTimeout(thread)
     if error:
         raise error[0]
     return result[0]
@@ -131,7 +142,7 @@ def _generate_audio_timed(text: str):
 def health() -> Tuple[Response, int]:
     if _load_error:
         return jsonify({"status": "error", "error": _load_error}), 503
-    if _model_state is None:
+    if _model_state is None or not _model_ready:
         return jsonify({"status": "loading"}), 503
 
     return jsonify(
@@ -164,9 +175,11 @@ def tts() -> Tuple[Response, int] | Response:
 
     try:
         with _model_lock:
-            audio = _generate_audio_timed(text)
-    except TimeoutError:
-        return jsonify({"error": "TTS generation timed out"}), 504
+            try:
+                audio = _generate_audio_timed(text)
+            except InferenceTimeout as exc:
+                exc.thread.join()
+                return jsonify({"error": "TTS generation timed out"}), 504
     except RuntimeError as exc:
         if _load_error or _model_state is None:
             return jsonify({"error": _load_error or "Model is not loaded yet"}), 503
