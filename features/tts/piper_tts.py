@@ -76,9 +76,8 @@ class PiperTTS:
             raise
 
     def generate_speech(self, text: str, output_path: Optional[str] = None) -> str:
-        if not isinstance(text, str) or not text.strip():
-            raise ValueError("text must be a non-empty string")
-
         if self.use_http:
             return self._http_client.generate_speech(text, output_path)
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("text must be a non-empty string")
         return self._generate_via_subprocess(text, output_path)
