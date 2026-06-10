@@ -13,13 +13,19 @@ OMNIVOICE_CLEANUP_DELAY = 10
 MIXED_AUDIO_DELAY = 0.3
 MUSIC_VOLUME_REDUCED = 0.2
 ELEVEN_MIXED_VOLUME = 0.5
-PIPER_MIXED_VOLUME = 0.2
-OMNIVOICE_MIXED_VOLUME = 0.2
+LOCAL_TTS_MIXED_VOLUME = 0.2
 
 HTTP_TTS_PROVIDER_CONFIG = {
-    'piper': (PIPER_CLEANUP_DELAY, PIPER_MIXED_VOLUME, 'Piper'),
-    'omnivoice': (OMNIVOICE_CLEANUP_DELAY, OMNIVOICE_MIXED_VOLUME, 'OmniVoice'),
+    'piper': (PIPER_CLEANUP_DELAY, LOCAL_TTS_MIXED_VOLUME, 'Piper'),
+    'omnivoice': (OMNIVOICE_CLEANUP_DELAY, LOCAL_TTS_MIXED_VOLUME, 'OmniVoice'),
 }
+
+
+def _unlink(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
 
 
 class MixedAudioSource(discord.AudioSource):
@@ -219,6 +225,7 @@ async def speak_tts_unified(
     ytdl,
     YTDLSource
 ) -> Dict[str, Any]:
+    provider_label = 'ElevenLabs'
     if tts_provider in HTTP_TTS_PROVIDER_CONFIG:
         cleanup_delay, mixed_volume, provider_label = HTTP_TTS_PROVIDER_CONFIG[tts_provider]
         if tts_provider not in tts_providers or not tts_providers[tts_provider]:
@@ -253,19 +260,13 @@ async def speak_tts_unified(
     resolved_channel_id, error = await _resolve_voice_channel(guild_id, channel_id)
     if error:
         if use_ffmpeg_direct:
-            try:
-                os.remove(audio_file)
-            except OSError:
-                pass
+            _unlink(audio_file)
         return {'success': False, 'error': error}
     
     voice_client = await music_bot.join_voice_channel(guild_id, resolved_channel_id)
     if not voice_client:
         if use_ffmpeg_direct:
-            try:
-                os.remove(audio_file)
-            except OSError:
-                pass
+            _unlink(audio_file)
         return {'success': False, 'error': 'Failed to join voice channel'}
 
     music_source_info = music_bot.get_current_music_source(guild_id)
@@ -310,7 +311,6 @@ async def speak_tts_unified(
                     after_play
                 )
                 if success:
-                    provider_label = HTTP_TTS_PROVIDER_CONFIG.get(tts_provider, (None, None, 'ElevenLabs'))[2]
                     return {'success': True, 'message': f'Speaking with {provider_label} and music...'}
             except Exception as e:
                 logger.warning(f"Failed to create mixed audio source, falling back to pause/resume: {e}")
@@ -324,7 +324,6 @@ async def speak_tts_unified(
             player = discord.PCMVolumeTransformer(discord.FFmpegPCMAudio(audio_file, options='-vn'), volume=1.0)
         
         voice_client.play(player, after=after_play)
-        provider_label = HTTP_TTS_PROVIDER_CONFIG.get(tts_provider, (None, None, 'ElevenLabs'))[2]
         return {'success': True, 'message': f'Speaking with {provider_label}...'}
     except Exception as e:
         logger.error(f"Error playing TTS: {e}")

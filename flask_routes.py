@@ -49,6 +49,9 @@ def create_flask_app(
         future = asyncio.run_coroutine_threadsafe(coro, bot_loop)
         return future.result(timeout=timeout)
 
+    def _omnivoice_timeout() -> int:
+        return int(os.getenv('OMNIVOICE_TIMEOUT', '90'))
+
     def _run_tts_speak(speak_func, timeout):
         request_data = request.get_json() or {}
         guild_id, channel_id = parse_guild_channel_ids(request_data)
@@ -229,11 +232,7 @@ def create_flask_app(
     @flask_app.route('/tts/speak', methods=['POST'])
     @require_bot_ready
     def tts_speak():
-        speak_timeout = (
-            int(os.getenv('OMNIVOICE_TIMEOUT', '90'))
-            if os.getenv('TTS_PROVIDER', 'elevenlabs') == 'omnivoice'
-            else 30
-        )
+        speak_timeout = _omnivoice_timeout() if os.getenv('TTS_PROVIDER', 'elevenlabs') == 'omnivoice' else 30
         return _run_tts_speak(speak_tts_func, speak_timeout)
 
     @flask_app.route('/tts/piper/speak', methods=['POST'])
@@ -246,7 +245,7 @@ def create_flask_app(
     def tts_omnivoice_speak():
         if not speak_omnivoice_tts_func:
             return jsonify({'error': 'OmniVoice TTS route not configured'}), 503
-        return _run_tts_speak(speak_omnivoice_tts_func, int(os.getenv('OMNIVOICE_TIMEOUT', '90')))
+        return _run_tts_speak(speak_omnivoice_tts_func, _omnivoice_timeout())
 
     @flask_app.route('/chatbot/message', methods=['POST'])
     @require_bot_ready
