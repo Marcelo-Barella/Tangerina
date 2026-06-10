@@ -32,7 +32,7 @@ def tts() -> Tuple[Response, int] | Response:
     
     text = sanitize_text(text)
     
-    if not text.strip():
+    if not text:
         return jsonify({"error": "Text contains only unsupported characters"}), 400
     
     if not os.path.exists(PIPER_MODEL_PATH):
