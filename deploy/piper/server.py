@@ -20,13 +20,13 @@ def health() -> Tuple[Response, int]:
 
 @app.route("/tts", methods=["POST"])
 def tts() -> Tuple[Response, int] | Response:
-    data: Dict[str, Any] | None = request.get_json(silent=True)
-    if not data:
+    payload: Dict[str, Any] | None = request.get_json(silent=True)
+    if not payload:
         return jsonify({"error": "Missing JSON body"}), 400
-    if "text" not in data:
+    if "text" not in payload:
         return jsonify({"error": "Missing 'text' field"}), 400
     
-    text = data["text"]
+    text = payload["text"]
     if not isinstance(text, str) or not text.strip():
         return jsonify({"error": "Text must be a non-empty string"}), 400
     

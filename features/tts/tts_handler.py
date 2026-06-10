@@ -252,22 +252,22 @@ async def speak_tts_unified(
         mixed_volume = ELEVEN_MIXED_VOLUME
         use_ffmpeg_direct = False
 
+    def discard_omnivoice_audio() -> None:
+        if tts_provider != 'omnivoice':
+            return
+        try:
+            os.remove(audio_file)
+        except OSError:
+            pass
+
     resolved_channel_id, error = await _resolve_voice_channel(guild_id, channel_id)
     if error:
-        if tts_provider == 'omnivoice':
-            try:
-                os.remove(audio_file)
-            except OSError:
-                pass
+        discard_omnivoice_audio()
         return {'success': False, 'error': error}
     
     voice_client = await music_bot.join_voice_channel(guild_id, resolved_channel_id)
     if not voice_client:
-        if tts_provider == 'omnivoice':
-            try:
-                os.remove(audio_file)
-            except OSError:
-                pass
+        discard_omnivoice_audio()
         return {'success': False, 'error': 'Failed to join voice channel'}
 
     music_source_info = music_bot.get_current_music_source(guild_id)

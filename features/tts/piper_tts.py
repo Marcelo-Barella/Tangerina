@@ -51,9 +51,6 @@ class PiperTTS:
         except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.SubprocessError):
             return False
 
-    def _generate_via_http(self, text: str, output_path: Optional[str] = None) -> str:
-        return generate_speech_via_http(self.api_url, text, 30, "Piper", output_path)
-
     def _generate_via_subprocess(self, text: str, output_path: Optional[str] = None) -> str:
         output_path = _ensure_output_path(output_path)
         
@@ -82,5 +79,5 @@ class PiperTTS:
             raise ValueError("text must be a non-empty string")
 
         if self.use_http:
-            return self._generate_via_http(text, output_path)
+            return generate_speech_via_http(self.api_url, text, 30, "Piper", output_path)
         return self._generate_via_subprocess(text, output_path)
