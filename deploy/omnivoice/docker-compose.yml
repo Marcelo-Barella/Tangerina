@@ -22,13 +22,6 @@ services:
       - "5003:5003"
     volumes:
       - omnivoice_cache:/app/cache/huggingface
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
 
 volumes:
   omnivoice_cache:

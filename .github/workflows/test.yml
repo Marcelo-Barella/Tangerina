@@ -59,6 +59,7 @@ jobs:
           --cov=flask_routes \
           --cov-report=xml \
           --cov-report=term \
+          --cov-fail-under=70 \
           --json-report \
           --json-report-file=test-results.json \
           --junitxml=junit.xml \
@@ -79,35 +80,7 @@ jobs:
         if [ -f test-results.json ]; then
           echo "## Test Summary (Python ${{ matrix.python-version }})" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          python3 << 'EOF'
-        import json
-        import sys
-        
-        try:
-            with open('test-results.json', 'r') as f:
-                data = json.load(f)
-            
-            summary = data.get('summary', {})
-            total = summary.get('total', 0)
-            passed = summary.get('passed', 0)
-            failed = summary.get('failed', 0)
-            skipped = summary.get('skipped', 0)
-            error = summary.get('error', 0)
-            duration = summary.get('duration', 0)
-            
-            print(f"- **Total:** {total}")
-            print(f"- **Passed:** {passed} :white_check_mark:")
-            print(f"- **Failed:** {failed} :x:")
-            print(f"- **Skipped:** {skipped}")
-            print(f"- **Error:** {error} :warning:")
-            print(f"- **Duration:** {duration:.2f}s")
-            
-            if failed > 0 or error > 0:
-                sys.exit(1)
-        except Exception as e:
-            print(f"Error generating summary: {e}")
-            sys.exit(1)
-        EOF
+          python3 .github/scripts/test_summary.py >> $GITHUB_STEP_SUMMARY || exit 1
         else
           echo "## Test Summary (Python ${{ matrix.python-version }})" >> $GITHUB_STEP_SUMMARY
           echo "No test results found" >> $GITHUB_STEP_SUMMARY
@@ -122,10 +95,6 @@ jobs:
         flags: unittests
         name: codecov-umbrella
         fail_ci_if_error: false
-
-    - name: Check coverage threshold
-      run: |
-        coverage report --fail-under=70 || (echo "Coverage below 70% threshold" && exit 1)
 
     - name: Generate coverage HTML report
       if: always()

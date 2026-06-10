@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import soundfile as sf
 import torch
-from flask import Flask, Response, jsonify, request, send_file
+from flask import Flask, Response, after_this_request, jsonify, request, send_file
 
 from model_loader import load_omnivoice_model
 from sanitize_text import sanitize_text
@@ -21,9 +21,16 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 _model_state: Optional[Dict[str, Any]] = None
+_model_ready = False
 _model_lock = threading.Lock()
 _load_error: Optional[str] = None
 _INFERENCE_TIMEOUT_SECONDS = int(os.getenv("OMNIVOICE_TIMEOUT", "90"))
+
+
+class InferenceTimeout(TimeoutError):
+    def __init__(self, thread: threading.Thread) -> None:
+        super().__init__("TTS generation timed out")
+        self.thread = thread
 
 
 def _generation_kwargs(text: str) -> Dict[str, Any]:
@@ -36,13 +43,15 @@ def _generation_kwargs(text: str) -> Dict[str, Any]:
 
 
 def _warmup_model() -> None:
-    global _model_state, _load_error
+    global _model_state, _model_ready, _load_error
     try:
         _model_state = load_omnivoice_model()
         model = _model_state["model"]
         kwargs = _generation_kwargs("warmup")
         logger.info("Warming up OmniVoice with voice design instruct=%r", kwargs["instruct"])
-        model.generate(**kwargs)
+        with _model_lock:
+            model.generate(**kwargs)
+        _model_ready = True
         logger.info("OmniVoice warmup complete")
     except Exception as exc:
         _load_error = str(exc)
@@ -52,6 +61,8 @@ def _warmup_model() -> None:
 def _get_model_state() -> Dict[str, Any]:
     if _model_state is None:
         raise RuntimeError(_load_error or "Model is not loaded yet")
+    if not _model_ready:
+        raise RuntimeError("Model is still warming up")
     return _model_state
 
 
@@ -92,7 +103,7 @@ def _generate_audio_timed(text: str):
     thread.start()
     thread.join(_INFERENCE_TIMEOUT_SECONDS)
     if thread.is_alive():
-        raise TimeoutError("TTS generation timed out")
+        raise InferenceTimeout(thread)
     if generation_error:
         raise generation_error[0]
     return audio_output[0]
@@ -102,7 +113,7 @@ def _generate_audio_timed(text: str):
 def health() -> Tuple[Response, int]:
     if _load_error:
         return jsonify({"status": "error", "error": _load_error}), 503
-    if _model_state is None:
+    if _model_state is None or not _model_ready:
         return jsonify({"status": "loading"}), 503
 
     return jsonify(
@@ -135,9 +146,11 @@ def tts() -> Tuple[Response, int] | Response:
 
     try:
         with _model_lock:
-            audio = _generate_audio_timed(text)
-    except TimeoutError:
-        return jsonify({"error": "TTS generation timed out"}), 504
+            try:
+                audio = _generate_audio_timed(text)
+            except InferenceTimeout as exc:
+                exc.thread.join()
+                return jsonify({"error": "TTS generation timed out"}), 504
     except RuntimeError as exc:
         if _load_error or _model_state is None:
             return jsonify({"error": _load_error or "Model is not loaded yet"}), 503
@@ -156,14 +169,27 @@ def tts() -> Tuple[Response, int] | Response:
 
     try:
         sf.write(output_path, waveform, 24000)
-        return send_file(
-            output_path,
-            mimetype="audio/wav",
-            as_attachment=True,
-            download_name="output.wav",
-        )
     except Exception as exc:
+        try:
+            os.remove(output_path)
+        except OSError:
+            pass
         return jsonify({"error": str(exc)}), 500
+
+    @after_this_request
+    def _remove_temp_file(response):
+        try:
+            os.remove(output_path)
+        except OSError:
+            pass
+        return response
+
+    return send_file(
+        output_path,
+        mimetype="audio/wav",
+        as_attachment=True,
+        download_name="output.wav",
+    )
 
 
 if __name__ == "__main__":
