@@ -53,30 +53,29 @@ class TestOmnivoiceTTS:
                 with pytest.raises(RuntimeError, match="OmniVoice TTS API error"):
                     client.generate_speech("ola")
 
-    def test_generate_speech_cleans_up_temp_file_on_timeout(self, tmp_path):
+    @pytest.mark.parametrize(
+        "post_kwargs,match",
+        [
+            ({"side_effect": requests.exceptions.Timeout}, "timed out"),
+            (
+                {
+                    "return_value": MagicMock(
+                        status_code=503,
+                        json=MagicMock(return_value={"error": "busy"}),
+                    )
+                },
+                "OmniVoice TTS API error",
+            ),
+        ],
+    )
+    def test_generate_speech_cleans_up_temp_file_on_failure(self, tmp_path, post_kwargs, match):
         with patch.dict(os.environ, {"OMNIVOICE_API_URL": "http://localhost:5003"}):
             client = OmnivoiceTTS()
             output_path = str(tmp_path / "out.wav")
             open(output_path, "wb").close()
 
-            with patch("features.tts.omnivoice_tts.requests.post", side_effect=requests.exceptions.Timeout):
-                with pytest.raises(RuntimeError, match="timed out"):
-                    client.generate_speech("ola", output_path=output_path)
-
-            assert not os.path.exists(output_path)
-
-    def test_generate_speech_cleans_up_temp_file_on_api_error(self, tmp_path):
-        with patch.dict(os.environ, {"OMNIVOICE_API_URL": "http://localhost:5003"}):
-            client = OmnivoiceTTS()
-            output_path = str(tmp_path / "out.wav")
-            open(output_path, "wb").close()
-
-            mock_response = MagicMock()
-            mock_response.status_code = 503
-            mock_response.json.return_value = {"error": "busy"}
-
-            with patch("features.tts.omnivoice_tts.requests.post", return_value=mock_response):
-                with pytest.raises(RuntimeError, match="OmniVoice TTS API error"):
+            with patch("features.tts.omnivoice_tts.requests.post", **post_kwargs):
+                with pytest.raises(RuntimeError, match=match):
                     client.generate_speech("ola", output_path=output_path)
 
             assert not os.path.exists(output_path)

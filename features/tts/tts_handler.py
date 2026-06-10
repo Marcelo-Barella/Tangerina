@@ -305,6 +305,8 @@ async def speak_tts_unified(
         def after_play(error, resume_music: bool = False):
             loop.call_soon_threadsafe(asyncio.create_task, cleanup_tts(resume_music))
 
+        provider_name = _TTS_PROVIDER_NAMES.get(tts_provider, 'ElevenLabs')
+
         if use_mixing and music_source_info:
             try:
                 success = await _play_tts_with_mixing(
@@ -320,7 +322,6 @@ async def speak_tts_unified(
                     partial(after_play, resume_music=False),
                 )
                 if success:
-                    provider_name = _TTS_PROVIDER_NAMES.get(tts_provider, 'ElevenLabs')
                     return {'success': True, 'message': f'Speaking with {provider_name} and music...'}
             except Exception as e:
                 logger.warning(f"Failed to create mixed audio source, falling back to pause/resume: {e}")
@@ -338,7 +339,6 @@ async def speak_tts_unified(
             player,
             after=partial(after_play, resume_music=mixing_music_stopped and was_playing),
         )
-        provider_name = _TTS_PROVIDER_NAMES.get(tts_provider, 'ElevenLabs')
         return {'success': True, 'message': f'Speaking with {provider_name}...'}
     except Exception as e:
         logger.error(f"Error playing TTS: {e}")
