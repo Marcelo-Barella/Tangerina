@@ -282,6 +282,8 @@ async def speak_tts_unified(
     was_playing = music_source_info is not None
     original_volume = None
     use_mixing = False
+    current_song = music_bot.current_songs.get(guild_id) if was_playing else None
+    mixing_music_stopped = False
 
     if was_playing:
         original_volume = _reduce_music_volume_for_tts(guild_id, music_bot)
@@ -291,7 +293,7 @@ async def speak_tts_unified(
     try:
         loop = music_bot.main_loop or asyncio.get_running_loop()
 
-        async def cleanup_tts():
+        async def cleanup_tts(resume_music: bool = False):
             await asyncio.sleep(cleanup_delay)
             try:
                 os.remove(audio_file)
@@ -299,12 +301,13 @@ async def speak_tts_unified(
                 pass
             if was_playing:
                 _restore_music_volume(guild_id, original_volume, music_bot)
+            if resume_music and current_song:
+                await _resume_music_after_tts(guild_id, current_song, voice_client, music_bot, YTDLSource)
 
-        def after_play(error):
-            loop.call_soon_threadsafe(asyncio.create_task, cleanup_tts())
+        def after_play(error, resume_music: bool = False):
+            loop.call_soon_threadsafe(asyncio.create_task, cleanup_tts(resume_music))
 
         if use_mixing and music_source_info:
-            current_song = music_bot.current_songs.get(guild_id)
             try:
                 success = await _play_tts_with_mixing(
                     guild_id,
@@ -317,7 +320,7 @@ async def speak_tts_unified(
                     YTDLSource,
                     mixed_volume,
                     cleanup_delay,
-                    after_play
+                    lambda error: after_play(error, resume_music=False),
                 )
                 if success:
                     provider_name = (
@@ -328,8 +331,9 @@ async def speak_tts_unified(
                     return {'success': True, 'message': f'Speaking with {provider_name} and music...'}
             except Exception as e:
                 logger.warning(f"Failed to create mixed audio source, falling back to pause/resume: {e}")
+                mixing_music_stopped = True
 
-        if was_playing:
+        if was_playing and not mixing_music_stopped:
             voice_client.pause()
         
         if use_ffmpeg_direct:
@@ -337,7 +341,10 @@ async def speak_tts_unified(
         else:
             player = discord.PCMVolumeTransformer(discord.FFmpegPCMAudio(audio_file, options='-vn'), volume=1.0)
         
-        voice_client.play(player, after=after_play)
+        voice_client.play(
+            player,
+            after=lambda error: after_play(error, resume_music=mixing_music_stopped and was_playing),
+        )
         provider_name = (
             'Piper' if tts_provider == 'piper'
             else 'OmniVoice' if tts_provider == 'omnivoice'
@@ -348,6 +355,9 @@ async def speak_tts_unified(
         logger.error(f"Error playing TTS: {e}")
         if was_playing:
             _restore_music_volume(guild_id, original_volume, music_bot)
-            if voice_client.is_paused():
+            if mixing_music_stopped and current_song:
+                loop = music_bot.main_loop or asyncio.get_running_loop()
+                loop.create_task(_resume_music_after_tts(guild_id, current_song, voice_client, music_bot, YTDLSource))
+            elif voice_client.is_paused():
                 voice_client.resume()
         return {'success': False, 'error': f'Failed to play TTS: {str(e)}'}

@@ -55,6 +55,7 @@ class OmnivoiceTTS:
                     error_msg = response.json().get("error", f"HTTP {response.status_code}")
                 except ValueError:
                     error_msg = f"HTTP {response.status_code}: {response.text[:100]}"
+                self._cleanup_file(output_path)
                 raise RuntimeError(f"OmniVoice TTS API error: {error_msg}")
 
             with open(output_path, "wb") as handle:
@@ -66,10 +67,13 @@ class OmnivoiceTTS:
 
             return output_path
         except requests.exceptions.Timeout:
+            self._cleanup_file(output_path)
             raise RuntimeError("TTS generation timed out")
         except requests.exceptions.ConnectionError as exc:
+            self._cleanup_file(output_path)
             raise RuntimeError(f"Failed to connect to OmniVoice TTS API at {self.api_url}: {exc}")
         except requests.exceptions.RequestException as exc:
+            self._cleanup_file(output_path)
             raise RuntimeError(f"OmniVoice TTS API request failed: {exc}")
         except Exception:
             self._cleanup_file(output_path)
