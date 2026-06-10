@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import soundfile as sf
 import torch
-from flask import Flask, Response, jsonify, request, send_file
+from flask import Flask, Response, after_this_request, jsonify, request, send_file
 
 from model_loader import load_omnivoice_model
 
@@ -156,14 +156,27 @@ def tts() -> Tuple[Response, int] | Response:
 
     try:
         sf.write(output_path, waveform, 24000)
-        return send_file(
-            output_path,
-            mimetype="audio/wav",
-            as_attachment=True,
-            download_name="output.wav",
-        )
     except Exception as exc:
+        try:
+            os.remove(output_path)
+        except OSError:
+            pass
         return jsonify({"error": str(exc)}), 500
+
+    @after_this_request
+    def _remove_temp_file(response):
+        try:
+            os.remove(output_path)
+        except OSError:
+            pass
+        return response
+
+    return send_file(
+        output_path,
+        mimetype="audio/wav",
+        as_attachment=True,
+        download_name="output.wav",
+    )
 
 
 if __name__ == "__main__":

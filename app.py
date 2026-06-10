@@ -151,6 +151,13 @@ elif TTS_PROVIDER == 'omnivoice' and OmnivoiceTTS:
     except Exception as e:
         logger.warning(f"OmniVoice TTS disabled: {e}")
 
+if OmnivoiceTTS and os.getenv('OMNIVOICE_API_URL') and 'omnivoice' not in tts_providers:
+    try:
+        tts_providers['omnivoice'] = OmnivoiceTTS()
+        logger.info("OmniVoice TTS sidecar client enabled for /tts/omnivoice/speak")
+    except Exception as e:
+        logger.warning(f"OmniVoice TTS sidecar client disabled: {e}")
+
 music_bot.chatbot = chatbot
 music_bot.tts_providers = tts_providers
 
