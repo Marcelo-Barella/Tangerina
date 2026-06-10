@@ -10,6 +10,8 @@ try:
 except ImportError:
     requests = None
 
+from features.tts.http_tts import generate_speech_via_http
+
 logger = logging.getLogger(__name__)
 
 
@@ -66,41 +68,7 @@ class PiperTTS:
             pass
 
     def _generate_via_http(self, text: str, output_path: Optional[str] = None) -> str:
-        output_path = self._ensure_output_path(output_path)
-        
-        try:
-            response = requests.post(
-                f"{self.api_url.rstrip('/')}/tts",
-                json={"text": text},
-                timeout=30,
-                stream=True
-            )
-            
-            if response.status_code != 200:
-                try:
-                    error_msg = response.json().get("error", f"HTTP {response.status_code}")
-                except ValueError:
-                    error_msg = f"HTTP {response.status_code}: {response.text[:100]}"
-                raise RuntimeError(f"Piper TTS API error: {error_msg}")
-            
-            with open(output_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
-            
-            if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
-                raise RuntimeError("Received empty or invalid audio file from Piper TTS API")
-            
-            return output_path
-            
-        except requests.exceptions.Timeout:
-            raise RuntimeError("TTS generation timed out")
-        except requests.exceptions.ConnectionError as e:
-            raise RuntimeError(f"Failed to connect to Piper TTS API at {self.api_url}: {e}")
-        except requests.exceptions.RequestException as e:
-            raise RuntimeError(f"Piper TTS API request failed: {e}")
-        except Exception:
-            self._cleanup_file(output_path)
-            raise
+        return generate_speech_via_http(self.api_url, text, 30, "Piper", output_path)
 
     def _generate_via_subprocess(self, text: str, output_path: Optional[str] = None) -> str:
         output_path = self._ensure_output_path(output_path)

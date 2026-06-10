@@ -33,7 +33,7 @@ class TestOmnivoiceTTS:
             mock_response.status_code = 200
             mock_response.iter_content.return_value = [b"RIFF", b"WAVE"]
 
-            with patch("features.tts.omnivoice_tts.requests.post", return_value=mock_response):
+            with patch("features.tts.http_tts.requests.post", return_value=mock_response):
                 result = client.generate_speech("ola", output_path=output_path)
 
             assert result == output_path
@@ -48,6 +48,6 @@ class TestOmnivoiceTTS:
             mock_response.status_code = 500
             mock_response.json.return_value = {"error": "model not loaded"}
 
-            with patch("features.tts.omnivoice_tts.requests.post", return_value=mock_response):
+            with patch("features.tts.http_tts.requests.post", return_value=mock_response):
                 with pytest.raises(RuntimeError, match="OmniVoice TTS API error"):
                     client.generate_speech("ola")
