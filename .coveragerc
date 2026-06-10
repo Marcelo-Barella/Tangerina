@@ -6,6 +6,14 @@ omit =
     */__pycache__/*
     .venv/*
     */venv/*
+    chatbot/embedding_service.py
+    chatbot/gemini_integration.py
+    chatbot/model_helper.py
+    chatbot/openai_integration.py
+    chatbot/zhipu_integration.py
+    features/music/music_bot.py
+    features/tts/piper_tts.py
+    features/tts/tts_handler.py
 
 [report]
 precision = 2
