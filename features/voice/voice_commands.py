@@ -537,8 +537,7 @@ class VoiceCommandSink(BaseSink):
             asyncio.run_coroutine_threadsafe(self._arm_health_monitor(), loop)
             return
         try:
-            running_loop = asyncio.get_running_loop()
-            self._reconnection_task = running_loop.create_task(self._check_connection_health())
+            asyncio.get_running_loop().create_task(self._arm_health_monitor())
         except RuntimeError:
             pass
 

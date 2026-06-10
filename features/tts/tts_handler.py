@@ -260,7 +260,6 @@ async def speak_tts_unified(
     resolved_channel_id, channel_error = await _resolve_voice_channel(guild_id, channel_id)
     if channel_error:
         setup_error = channel_error
-        voice_client = None
     else:
         voice_client = await music_bot.join_voice_channel(guild_id, resolved_channel_id)
         setup_error = 'Failed to join voice channel' if not voice_client else None
