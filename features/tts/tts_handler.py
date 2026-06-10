@@ -2,6 +2,7 @@ import os
 import asyncio
 import tempfile
 import logging
+from functools import partial
 from typing import Optional, Dict, Any
 import discord
 
@@ -15,6 +16,7 @@ MUSIC_VOLUME_REDUCED = 0.2
 ELEVEN_MIXED_VOLUME = 0.5
 PIPER_MIXED_VOLUME = 0.2
 OMNIVOICE_MIXED_VOLUME = 0.2
+_TTS_PROVIDER_NAMES = {'piper': 'Piper', 'omnivoice': 'OmniVoice'}
 
 
 class MixedAudioSource(discord.AudioSource):
@@ -320,14 +322,10 @@ async def speak_tts_unified(
                     YTDLSource,
                     mixed_volume,
                     cleanup_delay,
-                    lambda error: after_play(error, resume_music=False),
+                    partial(after_play, resume_music=False),
                 )
                 if success:
-                    provider_name = (
-                        'Piper' if tts_provider == 'piper'
-                        else 'OmniVoice' if tts_provider == 'omnivoice'
-                        else 'ElevenLabs'
-                    )
+                    provider_name = _TTS_PROVIDER_NAMES.get(tts_provider, 'ElevenLabs')
                     return {'success': True, 'message': f'Speaking with {provider_name} and music...'}
             except Exception as e:
                 logger.warning(f"Failed to create mixed audio source, falling back to pause/resume: {e}")
@@ -343,20 +341,15 @@ async def speak_tts_unified(
         
         voice_client.play(
             player,
-            after=lambda error: after_play(error, resume_music=mixing_music_stopped and was_playing),
+            after=partial(after_play, resume_music=mixing_music_stopped and was_playing),
         )
-        provider_name = (
-            'Piper' if tts_provider == 'piper'
-            else 'OmniVoice' if tts_provider == 'omnivoice'
-            else 'ElevenLabs'
-        )
+        provider_name = _TTS_PROVIDER_NAMES.get(tts_provider, 'ElevenLabs')
         return {'success': True, 'message': f'Speaking with {provider_name}...'}
     except Exception as e:
         logger.error(f"Error playing TTS: {e}")
         if was_playing:
             _restore_music_volume(guild_id, original_volume, music_bot)
             if mixing_music_stopped and current_song:
-                loop = music_bot.main_loop or asyncio.get_running_loop()
                 loop.create_task(_resume_music_after_tts(guild_id, current_song, voice_client, music_bot, YTDLSource))
             elif voice_client.is_paused():
                 voice_client.resume()

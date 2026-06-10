@@ -5,9 +5,9 @@ import sys
 def main() -> int:
     try:
         with open("test-results.json", "r") as f:
-            data = json.load(f)
+            report = json.load(f)
 
-        summary = data.get("summary", {})
+        summary = report.get("summary", {})
         total = summary.get("total", 0)
         passed = summary.get("passed", 0)
         failed = summary.get("failed", 0)
@@ -25,7 +25,7 @@ def main() -> int:
         if failed > 0 or error > 0:
             return 1
         return 0
-    except Exception as e:
+    except (OSError, json.JSONDecodeError) as e:
         print(f"Error generating summary: {e}")
         return 1
 

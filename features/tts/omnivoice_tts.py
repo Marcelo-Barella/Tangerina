@@ -41,6 +41,7 @@ class OmnivoiceTTS:
             raise ValueError("text must be a non-empty string")
 
         output_path = self._ensure_output_path(output_path)
+        succeeded = False
 
         try:
             response = requests.post(
@@ -55,7 +56,6 @@ class OmnivoiceTTS:
                     error_msg = response.json().get("error", f"HTTP {response.status_code}")
                 except ValueError:
                     error_msg = f"HTTP {response.status_code}: {response.text[:100]}"
-                self._cleanup_file(output_path)
                 raise RuntimeError(f"OmniVoice TTS API error: {error_msg}")
 
             with open(output_path, "wb") as handle:
@@ -65,16 +65,14 @@ class OmnivoiceTTS:
             if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
                 raise RuntimeError("Received empty or invalid audio file from OmniVoice TTS API")
 
+            succeeded = True
             return output_path
         except requests.exceptions.Timeout:
-            self._cleanup_file(output_path)
             raise RuntimeError("TTS generation timed out")
         except requests.exceptions.ConnectionError as exc:
-            self._cleanup_file(output_path)
             raise RuntimeError(f"Failed to connect to OmniVoice TTS API at {self.api_url}: {exc}")
         except requests.exceptions.RequestException as exc:
-            self._cleanup_file(output_path)
             raise RuntimeError(f"OmniVoice TTS API request failed: {exc}")
-        except Exception:
-            self._cleanup_file(output_path)
-            raise
+        finally:
+            if not succeeded:
+                self._cleanup_file(output_path)
