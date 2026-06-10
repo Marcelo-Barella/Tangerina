@@ -9,10 +9,12 @@ logger = logging.getLogger(__name__)
 
 ELEVEN_CLEANUP_DELAY = 20
 PIPER_CLEANUP_DELAY = 5
+OMNIVOICE_CLEANUP_DELAY = 10
 MIXED_AUDIO_DELAY = 0.3
 MUSIC_VOLUME_REDUCED = 0.2
 ELEVEN_MIXED_VOLUME = 0.5
 PIPER_MIXED_VOLUME = 0.2
+OMNIVOICE_MIXED_VOLUME = 0.2
 
 
 class MixedAudioSource(discord.AudioSource):
@@ -225,6 +227,16 @@ async def speak_tts_unified(
         mixed_volume = PIPER_MIXED_VOLUME
         audio_file = audio_path
         use_ffmpeg_direct = True
+    elif tts_provider == 'omnivoice':
+        if 'omnivoice' not in tts_providers or not tts_providers['omnivoice']:
+            return {'success': False, 'error': 'OmniVoice TTS not configured'}
+
+        omnivoice_tts = tts_providers['omnivoice']
+        audio_path = await asyncio.to_thread(omnivoice_tts.generate_speech, text)
+        cleanup_delay = OMNIVOICE_CLEANUP_DELAY
+        mixed_volume = OMNIVOICE_MIXED_VOLUME
+        audio_file = audio_path
+        use_ffmpeg_direct = True
     else:
         if tts_generate is None or not ELEVEN_API_KEY:
             return {'success': False, 'error': 'TTS unavailable: missing dependency or ELEVEN_API_KEY'}
@@ -298,7 +310,11 @@ async def speak_tts_unified(
                     after_play
                 )
                 if success:
-                    provider_name = 'Piper' if tts_provider == 'piper' else 'ElevenLabs'
+                    provider_name = (
+                        'Piper' if tts_provider == 'piper'
+                        else 'OmniVoice' if tts_provider == 'omnivoice'
+                        else 'ElevenLabs'
+                    )
                     return {'success': True, 'message': f'Speaking with {provider_name} and music...'}
             except Exception as e:
                 logger.warning(f"Failed to create mixed audio source, falling back to pause/resume: {e}")
@@ -312,7 +328,11 @@ async def speak_tts_unified(
             player = discord.PCMVolumeTransformer(discord.FFmpegPCMAudio(audio_file, options='-vn'), volume=1.0)
         
         voice_client.play(player, after=after_play)
-        provider_name = 'Piper' if tts_provider == 'piper' else 'ElevenLabs'
+        provider_name = (
+            'Piper' if tts_provider == 'piper'
+            else 'OmniVoice' if tts_provider == 'omnivoice'
+            else 'ElevenLabs'
+        )
         return {'success': True, 'message': f'Speaking with {provider_name}...'}
     except Exception as e:
         logger.error(f"Error playing TTS: {e}")

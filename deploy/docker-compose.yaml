@@ -12,6 +12,8 @@ services:
     environment:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - WHISPER_API_URL=${WHISPER_API_URL:-http://whisper-asr:5002}
+      - OMNIVOICE_API_URL=${OMNIVOICE_API_URL:-http://omnivoice-tts:5003}
+      - OMNIVOICE_TIMEOUT=${OMNIVOICE_TIMEOUT:-90}
     ports:
       - "5000:5000"
     volumes:
@@ -54,6 +56,43 @@ services:
       timeout: 10s
       retries: 3
       start_period: 120s
+
+  omnivoice-tts:
+    build:
+      context: ./omnivoice
+      dockerfile: Dockerfile
+    container_name: tangerina-omnivoice-tts
+    restart: unless-stopped
+    environment:
+      - OMNIVOICE_INSTRUCT=${OMNIVOICE_INSTRUCT:-female, brazilian accent}
+      - OMNIVOICE_PRECISION=${OMNIVOICE_PRECISION:-int8}
+      - OMNIVOICE_DEVICE=${OMNIVOICE_DEVICE:-auto}
+      - OMNIVOICE_MODEL=${OMNIVOICE_MODEL:-k2-fsa/OmniVoice}
+      - OMNIVOICE_NUM_STEP=${OMNIVOICE_NUM_STEP:-16}
+      - OMNIVOICE_SPEED=${OMNIVOICE_SPEED:-1.0}
+      - OMNIVOICE_LOAD_ASR=false
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HF_ENDPOINT=${HF_ENDPOINT:-}
+    ports:
+      - "5003:5003"
+    volumes:
+      - omnivoice_cache:/app/cache/huggingface
+    networks:
+      - tangerina-network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
 
   n8n:
     image: n8nio/n8n:latest
@@ -188,6 +227,8 @@ volumes:
     name: tangerina-n8n-data
   piper_models:
     name: tangerina-piper-models
+  omnivoice_cache:
+    name: tangerina-omnivoice-cache
   chromadb_data:
     name: tangerina-chromadb-data
 

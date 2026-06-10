@@ -1,0 +1,35 @@
+version: "3.8"
+
+services:
+  omnivoice-tts:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tangerina-omnivoice-tts
+    restart: unless-stopped
+    environment:
+      - OMNIVOICE_INSTRUCT=${OMNIVOICE_INSTRUCT:-female, brazilian accent}
+      - OMNIVOICE_PRECISION=${OMNIVOICE_PRECISION:-int8}
+      - OMNIVOICE_DEVICE=${OMNIVOICE_DEVICE:-auto}
+      - OMNIVOICE_MODEL=${OMNIVOICE_MODEL:-k2-fsa/OmniVoice}
+      - OMNIVOICE_NUM_STEP=${OMNIVOICE_NUM_STEP:-16}
+      - OMNIVOICE_SPEED=${OMNIVOICE_SPEED:-1.0}
+      - OMNIVOICE_LOAD_ASR=false
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HF_ENDPOINT=${HF_ENDPOINT:-}
+    ports:
+      - "5003:5003"
+    volumes:
+      - omnivoice_cache:/app/cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+volumes:
+  omnivoice_cache:
+    name: tangerina-omnivoice-cache

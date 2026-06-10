@@ -188,6 +188,57 @@ Como alternativa ao ElevenLabs, você pode usar Piper TTS (local e gratuito):
 
 **Nota**: Piper TTS roda localmente, não requer API keys e funciona offline!
 
+## Configuração do OmniVoice TTS (Opcional)
+
+OmniVoice é um TTS local multilíngue (600+ idiomas) com design de voz fixo. Recomendado para GPUs com 6 GB VRAM usando quantização INT8.
+
+### Sidecar Docker (recomendado)
+
+```bash
+cd deploy
+docker compose up -d omnivoice-tts
+docker compose logs -f omnivoice-tts
+```
+
+Aguarde o health check em `http://localhost:5003/health` (primeira execução baixa o modelo e quantiza para INT8).
+
+### Variáveis no `.env`
+
+```env
+TTS_PROVIDER=omnivoice
+OMNIVOICE_API_URL=http://omnivoice-tts:5003
+OMNIVOICE_INSTRUCT=female, brazilian accent
+OMNIVOICE_PRECISION=int8
+OMNIVOICE_TIMEOUT=90
+PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+```
+
+| Variável | Padrão | Descrição |
+|----------|--------|-----------|
+| `OMNIVOICE_API_URL` | — | URL do sidecar HTTP |
+| `OMNIVOICE_INSTRUCT` | `female, brazilian accent` | Voz fixa (voice design) |
+| `OMNIVOICE_PRECISION` | `int8` | `int8` (6 GB VRAM), `int4` ou `fp16` (8 GB+) |
+| `OMNIVOICE_TIMEOUT` | `90` | Timeout das requisições TTS |
+
+### Teste rápido do sidecar
+
+```bash
+curl http://localhost:5003/health
+curl -X POST http://localhost:5003/tts \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Olá, este é um teste."}' \
+  -o test.wav
+```
+
+### Sidecar standalone
+
+```bash
+cd deploy/omnivoice
+docker compose up --build
+```
+
+**Pré-requisitos:** Docker, ~10 GB de disco, GPU NVIDIA opcional (recomendada). Para GPU, instale [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html).
+
 ## Uso
 
 1. Inicie o bot:
@@ -223,7 +274,7 @@ O bot utiliza o provedor de IA configurado (ZhipuAI GLM, OpenAI GPT ou Google Ge
 12. **GET_MusicQueue** - Mostra fila de músicas
 13. **MusicSpotifyPlay** - Toca Spotify específico
 14. **MusicLeave** - Sai do canal e limpa recursos
-15. **TTSSpeak** - Síntese de voz via ElevenLabs ou Piper
+15. **TTSSpeak** - Síntese de voz via ElevenLabs, Piper ou OmniVoice
 16. **WebSearch** - Pesquisa na web para obter informações atualizadas
 
 O modelo de IA decide automaticamente quais ferramentas usar baseado no contexto da mensagem do usuário.
@@ -282,7 +333,7 @@ As respostas do chatbot não são enviadas automaticamente via Discord através 
 - `LOG_LEVEL` - Nível de log (padrão: INFO)
 - `SPOTIFY_CLIENT_ID` - Client ID do Spotify Developer App
 - `SPOTIFY_CLIENT_SECRET` - Client Secret do Spotify Developer App
-- `TTS_PROVIDER` - Provedor TTS: 'elevenlabs' ou 'piper' (padrão: elevenlabs)
+- `TTS_PROVIDER` - Provedor TTS: 'elevenlabs', 'piper' ou 'omnivoice' (padrão: elevenlabs)
 - `ELEVEN_API_KEY` - Chave da API ElevenLabs para TTS
 - `WHISPER_PROVIDER` - Provedor de transcrição de voz: 'zhipu' (GLM-ASR-2512) ou 'openai' (Whisper local) (padrão: zhipu)
 
@@ -686,6 +737,24 @@ GET /music/queue?guild_id=123456789012345678
 }
 ```
 
+#### POST /tts/omnivoice/speak
+**Corpo da Requisição:**
+```json
+{
+  "guild_id": 123456789012345678,
+  "channel_id": 987654321098765432,
+  "text": "Olá! Este é um teste de síntese de voz com OmniVoice."
+}
+```
+
+**Resposta (Sucesso):**
+```json
+{
+  "success": true,
+  "message": "Speaking with OmniVoice..."
+}
+```
+
 ### Chatbot ZhipuAI GLM
 
 #### POST /chatbot/message
@@ -800,7 +869,7 @@ Todos os comandos de música funcionam por voz:
 
 - `WHISPER_PROVIDER` (opcional) - Provedor de transcrição: 'zhipu' (GLM-ASR-2512) ou 'openai' (Whisper local) (padrão: zhipu)
 - `ZHIPU_API_KEY` (opcional) - Chave da API ZhipuAI GLM para chatbot e transcrição (necessário se WHISPER_PROVIDER=zhipu)
-- `TTS_PROVIDER` (opcional) - Provedor TTS: 'elevenlabs' ou 'piper' (padrão: elevenlabs)
+- `TTS_PROVIDER` (opcional) - Provedor TTS: 'elevenlabs', 'piper' ou 'omnivoice' (padrão: elevenlabs)
 - `ELEVEN_API_KEY` (opcional) - Chave da API ElevenLabs para TTS
 
 #### Docker Build com Whisper
@@ -855,6 +924,7 @@ Tangerina/
 │   ├── docker-compose.yaml
 │   ├── Dockerfile
 │   ├── piper/          # Serviço Piper TTS
+│   ├── omnivoice/      # Serviço OmniVoice TTS
 │   └── whisper/        # Serviço Whisper (opcional)
 ├── app.py              # Arquivo principal do bot
 ├── flask_routes.py     # API REST
@@ -880,7 +950,13 @@ O `docker-compose.yaml` define os seguintes serviços:
    - Volume: modelos Piper TTS
    - Health check: `/health`
 
-3. **n8n** - Serviço de automação (opcional, requer profile)
+3. **omnivoice-tts** - Serviço OmniVoice TTS local (opcional)
+   - Porta: 5003
+   - Volume: cache HuggingFace / pesos quantizados
+   - GPU NVIDIA opcional (INT8 padrão para 6 GB VRAM)
+   - Health check: `/health`
+
+4. **n8n** - Serviço de automação (opcional, requer profile)
    - Porta: 5678
    - Acessível apenas quando o profile `n8n` for ativado
 
@@ -925,6 +1001,7 @@ docker-compose logs -f tangerina-bot
 Os serviços incluem health checks automáticos:
 - Bot principal: `http://localhost:5000/health`
 - Piper TTS: `http://localhost:5001/health`
+- OmniVoice TTS: `http://localhost:5003/health`
 
 ### Variáveis de Ambiente no Docker
 
@@ -939,6 +1016,7 @@ Todas as variáveis de ambiente definidas no arquivo `.env` na raiz do projeto s
 - `tangerina_persona.txt` - Arquivo de persona (read-only)
 - `logs/` - Diretório de logs (read-write)
 - `piper_models/` - Modelos Piper TTS (gerenciado pelo Docker)
+- `omnivoice_cache/` - Cache OmniVoice / HuggingFace (gerenciado pelo Docker)
 - `n8n_data/` - Dados do n8n (gerenciado pelo Docker)
 
 ### Rede
