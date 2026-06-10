@@ -191,7 +191,6 @@ async def _play_tts_with_mixing(
         logger.info(f"Playing mixed source (music + TTS) for guild {guild_id}, music_url: {music_url[:80]}...")
         voice_client.play(mixed_source, after=mixed_after_play)
         logger.info(f"Mixed source playback started, is_playing: {voice_client.is_playing()}")
-        return True
     except Exception as e:
         logger.error(f"Failed to play mixed source: {e}")
         mixed_source.cleanup()
@@ -309,7 +308,7 @@ async def speak_tts_unified(
 
         if use_mixing and music_source_info:
             try:
-                success = await _play_tts_with_mixing(
+                await _play_tts_with_mixing(
                     guild_id,
                     voice_client,
                     music_source_info,
@@ -321,8 +320,7 @@ async def speak_tts_unified(
                     mixed_volume,
                     partial(after_play, resume_music=False),
                 )
-                if success:
-                    return {'success': True, 'message': f'Speaking with {provider_name} and music...'}
+                return {'success': True, 'message': f'Speaking with {provider_name} and music...'}
             except Exception as e:
                 logger.warning(f"Failed to create mixed audio source, falling back to pause/resume: {e}")
                 mixing_music_stopped = True

@@ -119,23 +119,23 @@ def _generate_audio(text: str):
 
 
 def _generate_audio_timed(text: str):
-    result: list = []
-    error: list = []
+    audio_output: list = []
+    generation_error: list = []
 
     def _run() -> None:
         try:
-            result.append(_generate_audio(text))
+            audio_output.append(_generate_audio(text))
         except Exception as exc:
-            error.append(exc)
+            generation_error.append(exc)
 
     thread = threading.Thread(target=_run, daemon=True)
     thread.start()
     thread.join(_inference_timeout_seconds())
     if thread.is_alive():
         raise InferenceTimeout(thread)
-    if error:
-        raise error[0]
-    return result[0]
+    if generation_error:
+        raise generation_error[0]
+    return audio_output[0]
 
 
 @app.route("/health", methods=["GET"])
