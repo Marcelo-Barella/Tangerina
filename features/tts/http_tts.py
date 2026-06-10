@@ -69,3 +69,19 @@ def generate_speech_via_http(
     except Exception:
         cleanup_temp_file(output_path)
         raise
+
+
+class HttpTTSClient:
+    def __init__(self, api_url: str, timeout: int, provider_name: str):
+        self.api_url = api_url.rstrip("/")
+        if not self.api_url:
+            raise RuntimeError(f"{provider_name} API URL is required")
+        self.timeout = timeout
+        self.provider_name = provider_name
+
+    def generate_speech(self, text: str, output_path: Optional[str] = None) -> str:
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("text must be a non-empty string")
+        return generate_speech_via_http(
+            self.api_url, text, self.timeout, self.provider_name, output_path
+        )

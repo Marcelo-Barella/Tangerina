@@ -9,7 +9,7 @@ try:
 except ImportError:
     requests = None
 
-from features.tts.http_tts import cleanup_temp_file, ensure_output_path, generate_speech_via_http
+from features.tts.http_tts import HttpTTSClient, cleanup_temp_file, ensure_output_path
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +22,7 @@ class PiperTTS:
         if self.use_http:
             if requests is None:
                 raise RuntimeError("requests library is required for HTTP API mode. Install with: pip install requests")
+            self._http_client = HttpTTSClient(self.api_url, 30, "Piper")
             logger.info(f"PiperTTS initialized in HTTP API mode: {self.api_url}")
             return
         
@@ -79,5 +80,5 @@ class PiperTTS:
             raise ValueError("text must be a non-empty string")
 
         if self.use_http:
-            return generate_speech_via_http(self.api_url, text, 30, "Piper", output_path)
+            return self._http_client.generate_speech(text, output_path)
         return self._generate_via_subprocess(text, output_path)

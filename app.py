@@ -51,10 +51,7 @@ try:
 except ImportError:
     PiperTTS = None
 
-try:
-    from features.tts.omnivoice_tts import OmnivoiceTTS
-except ImportError:
-    OmnivoiceTTS = None
+from features.tts.http_tts import HttpTTSClient
 
 from features.music.music_bot import MusicBot, YTDLSource
 from features.music.music_service import MusicService, _resolve_voice_channel
@@ -145,10 +142,12 @@ elif TTS_PROVIDER == 'piper' and PiperTTS:
         logger.info("Piper TTS enabled")
     except Exception as e:
         logger.warning(f"Piper TTS disabled: {e}")
-elif TTS_PROVIDER == 'omnivoice' and OmnivoiceTTS:
+elif TTS_PROVIDER == 'omnivoice':
     try:
-        tts_providers['omnivoice'] = OmnivoiceTTS()
-        logger.info("OmniVoice TTS enabled")
+        omnivoice_url = os.getenv("OMNIVOICE_API_URL", "").rstrip("/")
+        omnivoice_timeout = int(os.getenv("OMNIVOICE_TIMEOUT", "90"))
+        tts_providers['omnivoice'] = HttpTTSClient(omnivoice_url, omnivoice_timeout, "OmniVoice")
+        logger.info("OmniVoice TTS enabled: %s", omnivoice_url)
     except Exception as e:
         logger.warning(f"OmniVoice TTS disabled: {e}")
 

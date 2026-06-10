@@ -5,6 +5,8 @@ import logging
 from typing import Optional, Dict, Any
 import discord
 
+from features.tts.http_tts import cleanup_temp_file
+
 logger = logging.getLogger(__name__)
 
 ELEVEN_CLEANUP_DELAY = 20
@@ -19,13 +21,6 @@ HTTP_TTS_PROVIDER_CONFIG = {
     'piper': (PIPER_CLEANUP_DELAY, LOCAL_TTS_MIXED_VOLUME, 'Piper'),
     'omnivoice': (OMNIVOICE_CLEANUP_DELAY, LOCAL_TTS_MIXED_VOLUME, 'OmniVoice'),
 }
-
-
-def _unlink(path: str) -> None:
-    try:
-        os.remove(path)
-    except OSError:
-        pass
 
 
 class MixedAudioSource(discord.AudioSource):
@@ -260,13 +255,13 @@ async def speak_tts_unified(
     resolved_channel_id, error = await _resolve_voice_channel(guild_id, channel_id)
     if error:
         if use_ffmpeg_direct:
-            _unlink(audio_file)
+            cleanup_temp_file(audio_file)
         return {'success': False, 'error': error}
     
     voice_client = await music_bot.join_voice_channel(guild_id, resolved_channel_id)
     if not voice_client:
         if use_ffmpeg_direct:
-            _unlink(audio_file)
+            cleanup_temp_file(audio_file)
         return {'success': False, 'error': 'Failed to join voice channel'}
 
     music_source_info = music_bot.get_current_music_source(guild_id)
