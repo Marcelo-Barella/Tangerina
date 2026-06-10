@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir \
     --index-url ${TORCH_INDEX_URL} \
     && pip install --no-cache-dir -r /app/requirements.txt
 
-COPY model_loader.py quantize.py server.py entrypoint.sh /app/
+COPY model_loader.py quantize.py sanitize_text.py server.py entrypoint.sh /app/
 RUN chmod +x /app/entrypoint.sh /app/server.py
 
 ENV OMNIVOICE_PORT=5003

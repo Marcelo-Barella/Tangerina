@@ -24,7 +24,7 @@ RUN PIPER_VERSION="1.2.0" && \
 RUN mkdir -p /app/models && \
     pip install --no-cache-dir flask
 
-COPY server.py /app/server.py
+COPY sanitize_text.py server.py /app/
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/server.py /app/entrypoint.sh
 
