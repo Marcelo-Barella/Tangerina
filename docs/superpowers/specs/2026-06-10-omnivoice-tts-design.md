@@ -1,12 +1,14 @@
 # OmniVoice TTS Integration Design
 
 **Date:** 2026-06-10  
-**Status:** Approved  
+**Status:** Approved (updated for 6 GB VRAM)  
 **Project:** Tangerina Discord Bot
 
 ## Summary
 
 Add [OmniVoice](https://github.com/k2-fsa/OmniVoice) as a third local TTS provider alongside ElevenLabs and Piper. OmniVoice runs in a dedicated Docker sidecar with a Flask HTTP API. The main bot communicates via `OMNIVOICE_API_URL`, using **voice design** mode with a fixed `instruct` string for a consistent persona. The sidecar prefers GPU (CUDA) and falls back to CPU when no GPU is available.
+
+**Low-VRAM default:** There is no official "compact" OmniVoice checkpoint from k2-fsa. For GPUs with ≤8 GB VRAM (e.g. 6 GB), the sidecar defaults to **INT8 weight-only quantization** (~3.5 GB VRAM, ~98% quality) plus memory-saving load options (`load_asr=False`, 16 diffusion steps).
 
 ## Background
 
@@ -19,6 +21,22 @@ OmniVoice is an open-source, massively multilingual zero-shot TTS model (600+ la
 - **Voice cloning** — reference audio + transcript
 
 This integration uses **voice design only** with a fixed `instruct` environment variable.
+
+### Compact / low-VRAM note
+
+k2-fsa has [no official smaller OmniVoice variant](https://github.com/k2-fsa/OmniVoice/issues/69) (the HuggingFace model is already a 0.6B-parameter backbone). Full FP16 loading uses ~6 GB VRAM before inference activations, which causes OOM on 6 GB cards ([issue #41](https://github.com/k2-fsa/OmniVoice/issues/41)).
+
+The sidecar addresses this with:
+
+| Technique | VRAM impact | Quality |
+|-----------|-------------|---------|
+| **INT8 quantization** (TorchAO, default) | ~3.5 GB | ~98% |
+| INT4 quantization (optional) | ~2.2 GB | ~95% |
+| `load_asr=False` (no Whisper) | saves ~1–2 GB | N/A (voice design only) |
+| `num_step=16` | lower activation memory | slight vs 32 steps |
+| `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` | reduces fragmentation OOM | none |
+
+FP16 (`OMNIVOICE_PRECISION=fp16`) remains available for GPUs with 8 GB+ VRAM.
 
 ### Current TTS architecture
 
@@ -36,6 +54,8 @@ New providers follow the Piper pattern: a class with `generate_speech(text) -> w
 | Deployment | Docker sidecar | Matches Piper; keeps PyTorch out of main bot image |
 | Voice mode | Voice design (fixed `instruct`) | Consistent bot persona without reference audio |
 | Compute | GPU preferred, CPU fallback | Fast inference when GPU available; works on dev machines without NVIDIA |
+| Precision | INT8 default (`OMNIVOICE_PRECISION=int8`) | Fits 6 GB VRAM; FP16 opt-in for 8 GB+ |
+| ASR loading | Disabled (`load_asr=False`) | Voice design needs no Whisper; saves VRAM |
 | Voice commands | Keep Piper | Low-latency listening mode unchanged; OmniVoice opt-in via `TTS_PROVIDER` |
 
 ## Architecture
@@ -61,9 +81,10 @@ flowchart LR
 
 | File | Responsibility |
 |------|----------------|
-| `Dockerfile` | Python 3.11, PyTorch (CUDA-capable), `omnivoice` package |
-| `server.py` | Flask API: `GET /health`, `POST /tts` |
-| `entrypoint.sh` | Device detection, model preload/warmup on startup |
+| `Dockerfile` | Python 3.11, PyTorch (CUDA-capable), `omnivoice`, `torchao` |
+| `server.py` | Flask API: `GET /health`, `POST /tts`; model load with precision + `load_asr=False` |
+| `quantize.py` | One-time INT8/INT4 weight quantization; caches to volume |
+| `entrypoint.sh` | Device detection, quantize-if-needed, model warmup on startup |
 | `docker-compose.yml` | Standalone compose for testing the sidecar alone |
 
 ### New: `features/tts/omnivoice_tts.py`
@@ -100,8 +121,10 @@ Returns 200 when model is loaded and ready; 503 during warmup.
 {
   "status": "ok",
   "device": "cuda:0",
+  "precision": "int8",
   "model": "k2-fsa/OmniVoice",
-  "instruct": "female, brazilian accent"
+  "instruct": "female, brazilian accent",
+  "vram_estimate_gb": 3.5
 }
 ```
 
@@ -142,11 +165,36 @@ Text is sanitized (emoji/control chars removed) using the same approach as `depl
 |----------|---------|---------|
 | `OMNIVOICE_INSTRUCT` | `female, brazilian accent` | Fixed voice design string |
 | `OMNIVOICE_MODEL` | `k2-fsa/OmniVoice` | HuggingFace model ID |
+| `OMNIVOICE_PRECISION` | `int8` | `int8`, `int4`, or `fp16` |
 | `OMNIVOICE_DEVICE` | `auto` | `auto`, `cuda`, `cpu`, or `mps` |
 | `OMNIVOICE_NUM_STEP` | `16` | Diffusion steps (16 faster, 32 higher quality) |
 | `OMNIVOICE_SPEED` | `1.0` | Speech rate multiplier |
+| `OMNIVOICE_LOAD_ASR` | `false` | Never load Whisper ASR (voice design only) |
+| `PYTORCH_CUDA_ALLOC_CONF` | `expandable_segments:True` | Reduces VRAM fragmentation OOM |
 | `HF_TOKEN` | — | Optional, faster HuggingFace downloads |
 | `HF_ENDPOINT` | — | Optional mirror if HuggingFace is blocked |
+
+### Precision modes
+
+| `OMNIVOICE_PRECISION` | VRAM (approx.) | When to use |
+|-----------------------|----------------|-------------|
+| `int8` (default) | ~3.5 GB | 6 GB GPUs (recommended) |
+| `int4` | ~2.2 GB | Very tight VRAM; slight quality loss |
+| `fp16` | ~6 GB+ | 8 GB+ GPUs; best quality |
+
+Quantized weights are generated once on first startup via `quantize.py` (TorchAO weight-only quantization) and cached in the `omnivoice_cache` volume under `quantized/int8/` or `quantized/int4/`. Subsequent starts load from cache.
+
+### Model loading (sidecar)
+
+```python
+model = OmniVoice.from_pretrained(
+    model_path,  # k2-fsa/OmniVoice or cached quantized path
+    device_map=device,
+    dtype=torch.float16,
+    load_asr=False,
+)
+# If OMNIVOICE_PRECISION=int8|int4, apply TorchAO quantization before inference
+```
 
 ### Device auto-detection
 
@@ -156,7 +204,9 @@ When `OMNIVOICE_DEVICE=auto`:
 2. Else try MPS if available (Apple Silicon; not used in Docker but supported in standalone)
 3. Else CPU
 
-Dtype: `float16` on GPU, `float32` on CPU. Device choice is logged at startup and exposed in `/health`.
+When `OMNIVOICE_PRECISION=auto` (optional alias): pick `int8` if GPU VRAM ≤ 8 GB, else `fp16`.
+
+Dtype at inference: quantized weights dequantize to `float16` on GPU; `float32` on CPU. Device and precision are logged at startup and exposed in `/health`.
 
 On GPU OOM during inference, the sidecar retries once on CPU for that request.
 
@@ -174,9 +224,12 @@ omnivoice-tts:
   environment:
     - OMNIVOICE_INSTRUCT=${OMNIVOICE_INSTRUCT:-female, brazilian accent}
     - OMNIVOICE_DEVICE=auto
+    - OMNIVOICE_PRECISION=${OMNIVOICE_PRECISION:-int8}
     - OMNIVOICE_MODEL=${OMNIVOICE_MODEL:-k2-fsa/OmniVoice}
     - OMNIVOICE_NUM_STEP=${OMNIVOICE_NUM_STEP:-16}
     - OMNIVOICE_SPEED=${OMNIVOICE_SPEED:-1.0}
+    - OMNIVOICE_LOAD_ASR=false
+    - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
     - HF_TOKEN=${HF_TOKEN:-}
   ports:
     - "5003:5003"
@@ -254,9 +307,24 @@ elif TTS_PROVIDER == 'omnivoice' and OmnivoiceTTS:
 ### Prerequisites
 
 - Docker and Docker Compose
-- Optional: NVIDIA GPU + [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) for GPU acceleration
-- ~10 GB disk for model cache
-- 8 GB+ RAM (16 GB recommended)
+- NVIDIA GPU with [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) (6 GB VRAM works with default INT8)
+- ~10 GB disk for model cache + quantized weights
+- 8 GB+ system RAM (16 GB recommended)
+
+### 6 GB VRAM profile (default)
+
+This is the recommended configuration for cards like GTX 1060 6GB, RTX 2060, etc.:
+
+```env
+OMNIVOICE_PRECISION=int8
+OMNIVOICE_NUM_STEP=16
+OMNIVOICE_LOAD_ASR=false
+PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+```
+
+First startup takes longer (~5–10 min): downloads base weights, quantizes to INT8, warms up model. Quantized weights are cached in the `omnivoice_cache` volume.
+
+If you still hit OOM, try `OMNIVOICE_PRECISION=int4` or let CPU fallback handle requests.
 
 ### Full stack
 
@@ -314,9 +382,11 @@ Existing `tests/integration/test_flask_routes.py` pattern can be extended for re
 
 | Risk | Mitigation |
 |------|------------|
+| OOM on 6 GB GPU with FP16 | Default `OMNIVOICE_PRECISION=int8`; `load_asr=False` |
 | Slow CPU inference | Document GPU recommendation; use `OMNIVOICE_NUM_STEP=16` |
-| Long first startup | `start_period: 300s` healthcheck; model preload in entrypoint |
+| Long first startup (quantize step) | `start_period: 300s` healthcheck; cache quantized weights in volume |
 | Large image size | Isolated sidecar; not in main bot image |
+| INT8 quality vs FP16 | Document trade-off; user can set `OMNIVOICE_PRECISION=fp16` on 8 GB+ |
 | Voice design instability for pt-BR | Default `instruct` tuned for Brazilian Portuguese; user can override |
 | HuggingFace download failures | Document `HF_TOKEN` and `HF_ENDPOINT` mirror |
 
@@ -325,4 +395,6 @@ Existing `tests/integration/test_flask_routes.py` pattern can be extended for re
 - [k2-fsa/OmniVoice](https://github.com/k2-fsa/OmniVoice)
 - [omnivoice on PyPI](https://pypi.org/project/omnivoice/)
 - [Voice design attributes](https://github.com/k2-fsa/OmniVoice/blob/master/docs/voice-design.md)
+- [CUDA OOM on ≤8 GB VRAM (issue #41)](https://github.com/k2-fsa/OmniVoice/issues/41)
+- [INT8 quantization reference (zardus-ai/omnivoice-tts)](https://huggingface.co/zardus-ai/omnivoice-tts)
 - Existing Piper sidecar: `deploy/piper/`
