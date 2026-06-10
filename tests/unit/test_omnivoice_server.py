@@ -26,14 +26,16 @@ class TestOmnivoiceServerTimeout:
         app = omnivoice_server.app
         client = app.test_client()
 
-        with patch.object(omnivoice_server, "_model_lock", MagicMock()):
-            with patch.object(
+        with (
+            patch.object(omnivoice_server, "_model_lock", MagicMock()),
+            patch.object(
                 omnivoice_server,
                 "_generate_audio_timed",
                 side_effect=omnivoice_server.InferenceTimeout(hung_thread),
-            ):
-                with patch.object(omnivoice_server, "_inference_timeout_seconds", return_value=5):
-                    response = client.post("/tts", json={"text": "hello"})
+            ),
+            patch.object(omnivoice_server, "_inference_timeout_seconds", return_value=5),
+        ):
+            response = client.post("/tts", json={"text": "hello"})
 
         assert response.status_code == 504
         hung_thread.join.assert_called_once_with(timeout=5)

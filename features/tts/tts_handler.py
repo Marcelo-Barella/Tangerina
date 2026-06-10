@@ -257,23 +257,21 @@ async def speak_tts_unified(
         mixed_volume = ELEVEN_MIXED_VOLUME
         use_ffmpeg_direct = False
 
-    resolved_channel_id, error = await _resolve_voice_channel(guild_id, channel_id)
-    if error:
+    resolved_channel_id, channel_error = await _resolve_voice_channel(guild_id, channel_id)
+    if channel_error:
+        setup_error = channel_error
+        voice_client = None
+    else:
+        voice_client = await music_bot.join_voice_channel(guild_id, resolved_channel_id)
+        setup_error = 'Failed to join voice channel' if not voice_client else None
+
+    if setup_error:
         if tts_provider == 'omnivoice':
             try:
                 os.remove(audio_file)
             except OSError:
                 pass
-        return {'success': False, 'error': error}
-    
-    voice_client = await music_bot.join_voice_channel(guild_id, resolved_channel_id)
-    if not voice_client:
-        if tts_provider == 'omnivoice':
-            try:
-                os.remove(audio_file)
-            except OSError:
-                pass
-        return {'success': False, 'error': 'Failed to join voice channel'}
+        return {'success': False, 'error': setup_error}
 
     music_source_info = music_bot.get_current_music_source(guild_id)
     was_playing = music_source_info is not None

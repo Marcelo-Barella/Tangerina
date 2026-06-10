@@ -515,6 +515,12 @@ class VoiceCommandSink(BaseSink):
         if voice_client and voice_client.is_connected():
             await self.speak_tts_func(self.guild_id, voice_client.channel.id, response)
 
+    async def _arm_health_monitor(self) -> None:
+        try:
+            self._reconnection_task = asyncio.create_task(self._check_connection_health())
+        except Exception as e:
+            logger.error(f"Error starting health monitor: {e}")
+
     def _start_health_monitor(self) -> None:
         if self._health_monitor_started:
             return
@@ -528,18 +534,13 @@ class VoiceCommandSink(BaseSink):
         if not loop:
             loop = getattr(self.bot, 'loop', None)
         if loop and loop.is_running():
-            async def start_monitor():
-                try:
-                    self._reconnection_task = asyncio.create_task(self._check_connection_health())
-                except Exception as e:
-                    logger.error(f"Error starting health monitor: {e}")
-            asyncio.run_coroutine_threadsafe(start_monitor(), loop)
-        else:
-            try:
-                current_loop = asyncio.get_running_loop()
-                self._reconnection_task = asyncio.create_task(self._check_connection_health())
-            except RuntimeError:
-                pass
+            asyncio.run_coroutine_threadsafe(self._arm_health_monitor(), loop)
+            return
+        try:
+            running_loop = asyncio.get_running_loop()
+            self._reconnection_task = running_loop.create_task(self._check_connection_health())
+        except RuntimeError:
+            pass
 
     async def _check_connection_health(self) -> None:
         while True:
