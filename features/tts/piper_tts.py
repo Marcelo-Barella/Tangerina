@@ -9,7 +9,7 @@ try:
 except ImportError:
     requests = None
 
-from features.tts.http_tts import _cleanup_file, _ensure_output_path, generate_speech_via_http
+from features.tts.http_tts import cleanup_tts_file, ensure_output_path, generate_speech_via_http
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,7 @@ class PiperTTS:
             return False
 
     def _generate_via_subprocess(self, text: str, output_path: Optional[str] = None) -> str:
-        output_path = _ensure_output_path(output_path)
+        output_path = ensure_output_path(output_path)
         
         try:
             process = subprocess.run(
@@ -71,7 +71,7 @@ class PiperTTS:
         except subprocess.TimeoutExpired:
             raise RuntimeError("TTS generation timed out")
         except Exception:
-            _cleanup_file(output_path)
+            cleanup_tts_file(output_path)
             raise
 
     def generate_speech(self, text: str, output_path: Optional[str] = None) -> str:

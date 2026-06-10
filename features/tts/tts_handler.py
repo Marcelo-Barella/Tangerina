@@ -17,9 +17,23 @@ PIPER_MIXED_VOLUME = 0.2
 OMNIVOICE_MIXED_VOLUME = 0.2
 
 HTTP_TTS_PROVIDER_CONFIG = {
-    'piper': (PIPER_CLEANUP_DELAY, PIPER_MIXED_VOLUME, 'Piper'),
-    'omnivoice': (OMNIVOICE_CLEANUP_DELAY, OMNIVOICE_MIXED_VOLUME, 'OmniVoice'),
+    'piper': (PIPER_CLEANUP_DELAY, PIPER_MIXED_VOLUME),
+    'omnivoice': (OMNIVOICE_CLEANUP_DELAY, OMNIVOICE_MIXED_VOLUME),
 }
+
+HTTP_TTS_PROVIDER_LABELS = {
+    'piper': 'Piper',
+    'omnivoice': 'OmniVoice',
+}
+
+
+def _discard_omnivoice_audio(tts_provider: str, audio_file: str) -> None:
+    if tts_provider != 'omnivoice':
+        return
+    try:
+        os.remove(audio_file)
+    except OSError:
+        pass
 
 
 class MixedAudioSource(discord.AudioSource):
@@ -218,10 +232,10 @@ async def speak_tts_unified(
     ytdl,
     YTDLSource
 ) -> Dict[str, Any]:
-    provider_label = HTTP_TTS_PROVIDER_CONFIG.get(tts_provider, (None, None, 'ElevenLabs'))[2]
+    provider_label = HTTP_TTS_PROVIDER_LABELS.get(tts_provider, 'ElevenLabs')
 
     if tts_provider in HTTP_TTS_PROVIDER_CONFIG:
-        cleanup_delay, mixed_volume, _ = HTTP_TTS_PROVIDER_CONFIG[tts_provider]
+        cleanup_delay, mixed_volume = HTTP_TTS_PROVIDER_CONFIG[tts_provider]
         if tts_provider not in tts_providers or not tts_providers[tts_provider]:
             return {'success': False, 'error': f'{provider_label} TTS not configured'}
 
@@ -251,22 +265,14 @@ async def speak_tts_unified(
         mixed_volume = ELEVEN_MIXED_VOLUME
         use_ffmpeg_direct = False
 
-    def discard_omnivoice_audio() -> None:
-        if tts_provider != 'omnivoice':
-            return
-        try:
-            os.remove(audio_file)
-        except OSError:
-            pass
-
     resolved_channel_id, error = await _resolve_voice_channel(guild_id, channel_id)
     if error:
-        discard_omnivoice_audio()
+        _discard_omnivoice_audio(tts_provider, audio_file)
         return {'success': False, 'error': error}
     
     voice_client = await music_bot.join_voice_channel(guild_id, resolved_channel_id)
     if not voice_client:
-        discard_omnivoice_audio()
+        _discard_omnivoice_audio(tts_provider, audio_file)
         return {'success': False, 'error': 'Failed to join voice channel'}
 
     music_source_info = music_bot.get_current_music_source(guild_id)
