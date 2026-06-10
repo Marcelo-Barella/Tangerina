@@ -74,6 +74,10 @@ def _get_model_state() -> Dict[str, Any]:
     return _model_state
 
 
+def _inference_timeout_seconds() -> int:
+    return int(os.getenv("OMNIVOICE_TIMEOUT", "90"))
+
+
 def _generate_audio(text: str):
     state = _get_model_state()
     model = state["model"]
@@ -95,9 +99,32 @@ def _generate_audio(text: str):
             torch.cuda.empty_cache()
         try:
             model.to("cpu")
-        except Exception:
-            pass
-        return model.generate(**kwargs)
+            return model.generate(**kwargs)
+        finally:
+            try:
+                model.to(device)
+            except Exception:
+                logger.warning("Failed to restore model to %s after CPU retry", device)
+
+
+def _generate_audio_timed(text: str):
+    result: list = []
+    error: list = []
+
+    def _run() -> None:
+        try:
+            result.append(_generate_audio(text))
+        except Exception as exc:
+            error.append(exc)
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+    thread.join(_inference_timeout_seconds())
+    if thread.is_alive():
+        raise TimeoutError("TTS generation timed out")
+    if error:
+        raise error[0]
+    return result[0]
 
 
 @app.route("/health", methods=["GET"])
@@ -137,7 +164,9 @@ def tts() -> Tuple[Response, int] | Response:
 
     try:
         with _model_lock:
-            audio = _generate_audio(text)
+            audio = _generate_audio_timed(text)
+    except TimeoutError:
+        return jsonify({"error": "TTS generation timed out"}), 504
     except RuntimeError as exc:
         if _load_error or _model_state is None:
             return jsonify({"error": _load_error or "Model is not loaded yet"}), 503

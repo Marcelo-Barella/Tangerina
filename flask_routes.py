@@ -225,7 +225,12 @@ def create_flask_app(
         if not text:
             return jsonify({'error': 'text is required'}), 400
 
-        tts_response = run_async(speak_tts_func(guild_id, channel_id, text), timeout=30)
+        speak_timeout = (
+            int(os.getenv('OMNIVOICE_TIMEOUT', '90'))
+            if os.getenv('TTS_PROVIDER', 'elevenlabs') == 'omnivoice'
+            else 30
+        )
+        tts_response = run_async(speak_tts_func(guild_id, channel_id, text), timeout=speak_timeout)
         return jsonify(tts_response), 200 if tts_response.get('success') else 500
 
     @flask_app.route('/tts/piper/speak', methods=['POST'])
