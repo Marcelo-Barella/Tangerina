@@ -6,7 +6,6 @@ import re
 import io
 import wave
 import struct
-import time
 from typing import Dict, Optional, Callable, Any, Set, List
 from collections import deque
 import aiohttp
@@ -28,7 +27,6 @@ AUDIO_CHANNELS = 1
 TRANSCRIPTION_TIMEOUT = 30
 LISTENING_VOLUME = 20
 CONNECTION_HEALTH_CHECK_INTERVAL = 5.0
-CONNECTION_TIMEOUT = 10.0
 
 try:
     from discord.ext import voice_recv
@@ -87,10 +85,8 @@ class VoiceCommandSink(BaseSink):
         self.listening_mode: Dict[int, bool] = {}
         self.listening_tasks: Dict[int, asyncio.Task] = {}
         self.original_volumes: Dict[int, float] = {}
-        self.last_audio_timestamps: Dict[int, float] = {}
         self._reconnection_task: Optional[asyncio.Task] = None
         self._reconnecting: bool = False
-        self._sink_created_time: float = time.time()
         self._health_monitor_started: bool = False
         self._validate_provider_config()
 
@@ -119,7 +115,6 @@ class VoiceCommandSink(BaseSink):
                 if user.id not in self.audio_buffers:
                     self.audio_buffers[user.id] = deque(maxlen=AUDIO_BUFFER_MAXLEN)
                 self.audio_buffers[user.id].append(data.pcm)
-                self.last_audio_timestamps[user.id] = time.time()
         except OpusError as e:
             logger.error(f"OpusError in write() for user {user.id if user else None}: {e}")
             loop = None
@@ -590,7 +585,6 @@ class VoiceCommandSink(BaseSink):
             vc = await self.music_bot_ref.reconnect_voice_client(guild_id)
             if vc:
                 self._voice_client = vc
-                self.last_audio_timestamps.clear()
                 logger.info(f"Successfully reconnected voice client for guild {guild_id}")
                 return True
             else:
@@ -617,4 +611,3 @@ class VoiceCommandSink(BaseSink):
         self.listening_tasks.clear()
         self.listening_mode.clear()
         self.original_volumes.clear()
-        self.last_audio_timestamps.clear()

@@ -291,8 +291,6 @@ class MusicBot:
                 self.voice_clients[guild_id] = vc
                 sink._voice_client = vc
             sink._start_health_monitor()
-            sink.last_audio_timestamps.clear()
-            sink._sink_created_time = time.time()
             logger.info(f"Successfully reconnected voice client for guild {guild_id}")
             return vc
         except Exception as e:
