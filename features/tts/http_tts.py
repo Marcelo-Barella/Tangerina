@@ -8,6 +8,35 @@ except ImportError:
     requests = None
 
 
+class HttpTTSClient:
+    def __init__(self, api_url: str, timeout: int, provider_name: str):
+        self.api_url = api_url.rstrip("/")
+        if not self.api_url:
+            raise RuntimeError(f"API URL is required for {provider_name} HTTP mode")
+        self.timeout = timeout
+        self.provider_name = provider_name
+
+    def generate_speech(self, text: str, output_path: Optional[str] = None) -> str:
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("text must be a non-empty string")
+        return generate_speech_via_http(
+            self.api_url, text, self.timeout, self.provider_name, output_path
+        )
+
+
+def create_omnivoice_client(
+    api_url: Optional[str] = None, timeout: Optional[int] = None
+) -> HttpTTSClient:
+    url = (api_url or os.getenv("OMNIVOICE_API_URL", "")).rstrip("/")
+    if not url:
+        raise RuntimeError("OMNIVOICE_API_URL is required for OmniVoice TTS")
+    return HttpTTSClient(
+        url,
+        timeout or int(os.getenv("OMNIVOICE_TIMEOUT", "90")),
+        "OmniVoice",
+    )
+
+
 def ensure_output_path(output_path: Optional[str]) -> str:
     if output_path:
         return output_path

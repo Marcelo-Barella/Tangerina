@@ -51,9 +51,9 @@ except ImportError:
     PiperTTS = None
 
 try:
-    from features.tts.omnivoice_tts import OmnivoiceTTS
+    from features.tts.http_tts import create_omnivoice_client
 except ImportError:
-    OmnivoiceTTS = None
+    create_omnivoice_client = None
 
 from features.music.music_bot import MusicBot, YTDLSource
 from features.music.music_service import MusicService, _resolve_voice_channel
@@ -144,16 +144,16 @@ elif TTS_PROVIDER == 'piper' and PiperTTS:
         logger.info("Piper TTS enabled")
     except Exception as e:
         logger.warning(f"Piper TTS disabled: {e}")
-elif TTS_PROVIDER == 'omnivoice' and OmnivoiceTTS:
+elif TTS_PROVIDER == 'omnivoice' and create_omnivoice_client:
     try:
-        tts_providers['omnivoice'] = OmnivoiceTTS()
+        tts_providers['omnivoice'] = create_omnivoice_client()
         logger.info("OmniVoice TTS enabled")
     except Exception as e:
         logger.warning(f"OmniVoice TTS disabled: {e}")
 
-if OmnivoiceTTS and os.getenv('OMNIVOICE_API_URL') and 'omnivoice' not in tts_providers:
+if create_omnivoice_client and os.getenv('OMNIVOICE_API_URL') and 'omnivoice' not in tts_providers:
     try:
-        tts_providers['omnivoice'] = OmnivoiceTTS()
+        tts_providers['omnivoice'] = create_omnivoice_client()
         logger.info("OmniVoice TTS sidecar client enabled for /tts/omnivoice/speak")
     except Exception as e:
         logger.warning(f"OmniVoice TTS sidecar client disabled: {e}")

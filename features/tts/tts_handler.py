@@ -1,4 +1,3 @@
-import os
 import asyncio
 import tempfile
 import logging
@@ -278,10 +277,7 @@ async def speak_tts_unified(
 
         async def cleanup_tts():
             await asyncio.sleep(cleanup_delay)
-            try:
-                os.remove(audio_file)
-            except OSError:
-                pass
+            cleanup_tts_file(audio_file)
             if was_playing:
                 _restore_music_volume(guild_id, original_volume, music_bot)
 

@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
-from features.tts.http_tts import cleanup_tts_file, ensure_output_path, generate_speech_via_http
+from features.tts.http_tts import HttpTTSClient, cleanup_tts_file, ensure_output_path
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +15,7 @@ class PiperTTS:
         self.use_http = bool(self.api_url)
         
         if self.use_http:
+            self._http_client = HttpTTSClient(self.api_url, 30, "Piper")
             logger.info(f"PiperTTS initialized in HTTP API mode: {self.api_url}")
             return
         
@@ -72,5 +73,5 @@ class PiperTTS:
             raise ValueError("text must be a non-empty string")
 
         if self.use_http:
-            return generate_speech_via_http(self.api_url, text, 30, "Piper", output_path)
+            return self._http_client.generate_speech(text, output_path)
         return self._generate_via_subprocess(text, output_path)

@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from features.tts.omnivoice_tts import OmnivoiceTTS
+from features.tts.http_tts import create_omnivoice_client
 
 
 @pytest.mark.unit
@@ -11,22 +11,22 @@ class TestOmnivoiceTTS:
     def test_init_requires_api_url(self):
         with patch.dict(os.environ, {}, clear=True):
             with pytest.raises(RuntimeError, match="OMNIVOICE_API_URL"):
-                OmnivoiceTTS()
+                create_omnivoice_client()
 
     def test_init_strips_trailing_slash(self):
         with patch.dict(os.environ, {"OMNIVOICE_API_URL": "http://localhost:5003/"}):
-            client = OmnivoiceTTS()
+            client = create_omnivoice_client()
             assert client.api_url == "http://localhost:5003"
 
     def test_generate_speech_rejects_empty_text(self):
         with patch.dict(os.environ, {"OMNIVOICE_API_URL": "http://localhost:5003"}):
-            client = OmnivoiceTTS()
+            client = create_omnivoice_client()
             with pytest.raises(ValueError, match="non-empty string"):
                 client.generate_speech("   ")
 
     def test_generate_speech_writes_response(self, tmp_path):
         with patch.dict(os.environ, {"OMNIVOICE_API_URL": "http://localhost:5003"}):
-            client = OmnivoiceTTS()
+            client = create_omnivoice_client()
             output_path = str(tmp_path / "out.wav")
 
             mock_response = MagicMock()
@@ -42,7 +42,7 @@ class TestOmnivoiceTTS:
 
     def test_generate_speech_raises_on_api_error(self):
         with patch.dict(os.environ, {"OMNIVOICE_API_URL": "http://localhost:5003"}):
-            client = OmnivoiceTTS()
+            client = create_omnivoice_client()
 
             mock_response = MagicMock()
             mock_response.status_code = 500
