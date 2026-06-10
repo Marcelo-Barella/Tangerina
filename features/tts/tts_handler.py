@@ -177,29 +177,26 @@ async def _play_tts_with_mixing(
     music_url = await _get_fresh_music_url(guild_id, current_song, music_source_info['url'], ytdl) if current_song else music_source_info['url']
     
     mixed_source = MixedAudioSource(music_url, tts_file, music_volume=music_volume)
-    if mixed_source:
-        def mixed_after_play(error):
-            if mixed_source:
-                mixed_source.cleanup()
-            cleanup_callback()
-            if current_song:
-                loop = music_bot.main_loop or asyncio.get_running_loop()
-                loop.call_soon_threadsafe(asyncio.create_task, _resume_music_after_tts(guild_id, current_song, voice_client, music_bot, YTDLSource))
-        
-        voice_client.stop()
-        await asyncio.sleep(MIXED_AUDIO_DELAY)
-        
-        try:
-            logger.info(f"Playing mixed source (music + TTS) for guild {guild_id}, music_url: {music_url[:80]}...")
-            voice_client.play(mixed_source, after=mixed_after_play)
-            logger.info(f"Mixed source playback started, is_playing: {voice_client.is_playing()}")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to play mixed source: {e}")
-            if mixed_source:
-                mixed_source.cleanup()
-            raise
-    return False
+
+    def mixed_after_play(error):
+        mixed_source.cleanup()
+        cleanup_callback(error)
+        if current_song:
+            loop = music_bot.main_loop or asyncio.get_running_loop()
+            loop.call_soon_threadsafe(asyncio.create_task, _resume_music_after_tts(guild_id, current_song, voice_client, music_bot, YTDLSource))
+
+    voice_client.stop()
+    await asyncio.sleep(MIXED_AUDIO_DELAY)
+
+    try:
+        logger.info(f"Playing mixed source (music + TTS) for guild {guild_id}, music_url: {music_url[:80]}...")
+        voice_client.play(mixed_source, after=mixed_after_play)
+        logger.info(f"Mixed source playback started, is_playing: {voice_client.is_playing()}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to play mixed source: {e}")
+        mixed_source.cleanup()
+        raise
 
 
 async def speak_tts_unified(

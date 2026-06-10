@@ -2,6 +2,7 @@ import os
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 
 from features.tts.omnivoice_tts import OmnivoiceTTS
 
@@ -58,7 +59,7 @@ class TestOmnivoiceTTS:
             output_path = str(tmp_path / "out.wav")
             open(output_path, "wb").close()
 
-            with patch("features.tts.omnivoice_tts.requests.post", side_effect=__import__("requests").exceptions.Timeout):
+            with patch("features.tts.omnivoice_tts.requests.post", side_effect=requests.exceptions.Timeout):
                 with pytest.raises(RuntimeError, match="timed out"):
                     client.generate_speech("ola", output_path=output_path)
 
