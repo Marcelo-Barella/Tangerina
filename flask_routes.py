@@ -17,8 +17,7 @@ def create_flask_app(
     music_service: MusicService,
     chatbot,
     speak_tts_func,
-    speak_piper_tts_func,
-    speak_omnivoice_tts_func=None,
+    omnivoice_enabled=False,
 ):
     flask_app = Flask(__name__)
     bot_loop = None
@@ -49,7 +48,7 @@ def create_flask_app(
         future = asyncio.run_coroutine_threadsafe(coro, bot_loop)
         return future.result(timeout=timeout)
 
-    def _run_tts_speak(speak_func, timeout, timeout_error=None):
+    def _run_tts_speak(timeout, timeout_error=None, provider=None):
         request_data = request.get_json() or {}
         guild_id, channel_id = parse_guild_channel_ids(request_data)
         if guild_id is None or channel_id is None:
@@ -60,7 +59,11 @@ def create_flask_app(
             return jsonify({'error': 'text is required'}), 400
 
         try:
-            tts_response = run_async(speak_func(guild_id, channel_id, text), timeout=timeout)
+            if provider:
+                coro = speak_tts_func(guild_id, channel_id, text, provider)
+            else:
+                coro = speak_tts_func(guild_id, channel_id, text)
+            tts_response = run_async(coro, timeout=timeout)
         except TimeoutError:
             return jsonify({
                 'success': False,
@@ -240,23 +243,23 @@ def create_flask_app(
             if os.getenv('TTS_PROVIDER', 'elevenlabs') == 'omnivoice'
             else 30
         )
-        return _run_tts_speak(speak_tts_func, speak_timeout)
+        return _run_tts_speak(speak_timeout)
 
     @flask_app.route('/tts/piper/speak', methods=['POST'])
     @require_bot_ready
     def tts_piper_speak():
-        return _run_tts_speak(speak_piper_tts_func, 30)
+        return _run_tts_speak(30, provider='piper')
 
     @flask_app.route('/tts/omnivoice/speak', methods=['POST'])
     @require_bot_ready
     def tts_omnivoice_speak():
-        if not speak_omnivoice_tts_func:
+        if not omnivoice_enabled:
             return jsonify({'error': 'OmniVoice TTS route not configured'}), 503
         omnivoice_timeout = int(os.getenv('OMNIVOICE_TIMEOUT', '90'))
         return _run_tts_speak(
-            speak_omnivoice_tts_func,
             omnivoice_timeout + 30,
             'OmniVoice TTS request timed out',
+            provider='omnivoice',
         )
 
     @flask_app.route('/chatbot/message', methods=['POST'])

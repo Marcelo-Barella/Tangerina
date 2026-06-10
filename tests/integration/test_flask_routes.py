@@ -214,15 +214,14 @@ class TestOmnivoiceSpeakEndpoint:
     ):
         from flask_routes import create_flask_app
 
-        speak_omnivoice = AsyncMock()
+        speak_tts = AsyncMock()
         app, set_loop = create_flask_app(
             mock_bot,
             mock_music_bot,
             mock_music_service,
             MagicMock(),
-            AsyncMock(),
-            AsyncMock(),
-            speak_omnivoice,
+            speak_tts,
+            True,
         )
         set_loop(asyncio.get_event_loop())
         app.config['TESTING'] = True
