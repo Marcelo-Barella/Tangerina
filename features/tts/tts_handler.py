@@ -174,7 +174,6 @@ async def _play_tts_with_mixing(
     ytdl,
     YTDLSource,
     music_volume: float,
-    cleanup_delay: float,
     cleanup_callback
 ):
     music_url = await _get_fresh_music_url(guild_id, current_song, music_source_info['url'], ytdl) if current_song else music_source_info['url']
@@ -308,7 +307,6 @@ async def speak_tts_unified(
                     ytdl,
                     YTDLSource,
                     mixed_volume,
-                    cleanup_delay,
                     after_play
                 )
                 if success:
