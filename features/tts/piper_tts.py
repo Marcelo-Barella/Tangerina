@@ -4,11 +4,6 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
-try:
-    import requests
-except ImportError:
-    requests = None
-
 from features.tts.http_tts import cleanup_tts_file, ensure_output_path, generate_speech_via_http
 
 logger = logging.getLogger(__name__)
@@ -20,8 +15,6 @@ class PiperTTS:
         self.use_http = bool(self.api_url)
         
         if self.use_http:
-            if requests is None:
-                raise RuntimeError("requests library is required for HTTP API mode. Install with: pip install requests")
             logger.info(f"PiperTTS initialized in HTTP API mode: {self.api_url}")
             return
         
