@@ -159,13 +159,13 @@ def health() -> Tuple[Response, int]:
 
 @app.route("/tts", methods=["POST"])
 def tts() -> Tuple[Response, int] | Response:
-    data: Dict[str, Any] | None = request.get_json(silent=True)
-    if not data:
+    payload: Dict[str, Any] | None = request.get_json(silent=True)
+    if not payload:
         return jsonify({"error": "Missing JSON body"}), 400
-    if "text" not in data:
+    if "text" not in payload:
         return jsonify({"error": "Missing 'text' field"}), 400
 
-    text = data["text"]
+    text = payload["text"]
     if not isinstance(text, str) or not text.strip():
         return jsonify({"error": "Text must be a non-empty string"}), 400
 
@@ -175,17 +175,16 @@ def tts() -> Tuple[Response, int] | Response:
 
     try:
         with _model_lock:
-            try:
-                audio = _generate_audio_timed(text)
-            except InferenceTimeout as exc:
-                join_timeout = _inference_timeout_seconds()
-                exc.thread.join(timeout=join_timeout)
-                if exc.thread.is_alive():
-                    logger.error(
-                        "Timed-out inference thread still running after %ss join wait",
-                        join_timeout,
-                    )
-                return jsonify({"error": "TTS generation timed out"}), 504
+            audio = _generate_audio_timed(text)
+    except InferenceTimeout as exc:
+        join_timeout = _inference_timeout_seconds()
+        exc.thread.join(timeout=join_timeout)
+        if exc.thread.is_alive():
+            logger.error(
+                "Timed-out inference thread still running after %ss join wait",
+                join_timeout,
+            )
+        return jsonify({"error": "TTS generation timed out"}), 504
     except RuntimeError as exc:
         if _load_error or _model_state is None:
             return jsonify({"error": _load_error or "Model is not loaded yet"}), 503

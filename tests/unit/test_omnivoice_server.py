@@ -26,11 +26,7 @@ class TestOmnivoiceServerTimeout:
         app = omnivoice_server.app
         client = app.test_client()
 
-        mock_lock = MagicMock()
-        mock_lock.__enter__ = MagicMock(return_value=None)
-        mock_lock.__exit__ = MagicMock(return_value=None)
-
-        with patch.object(omnivoice_server, "_model_lock", mock_lock):
+        with patch.object(omnivoice_server, "_model_lock", MagicMock()):
             with patch.object(
                 omnivoice_server,
                 "_generate_audio_timed",

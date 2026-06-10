@@ -35,9 +35,9 @@ class TestOmnivoiceTTS:
             mock_response.iter_content.return_value = [b"RIFF", b"WAVE"]
 
             with patch("features.tts.omnivoice_tts.requests.post", return_value=mock_response):
-                result = client.generate_speech("ola", output_path=output_path)
+                output_file = client.generate_speech("ola", output_path=output_path)
 
-            assert result == output_path
+            assert output_file == output_path
             with open(output_path, "rb") as handle:
                 assert handle.read() == b"RIFFWAVE"
 
