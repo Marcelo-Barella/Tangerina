@@ -3,8 +3,8 @@ version: '3.8'
 services:
   piper-tts:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: piper/Dockerfile
     container_name: piper-tts
     restart: unless-stopped
     environment:

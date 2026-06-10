@@ -3,8 +3,8 @@ version: "3.8"
 services:
   omnivoice-tts:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: omnivoice/Dockerfile
     container_name: tangerina-omnivoice-tts
     restart: unless-stopped
     environment:
