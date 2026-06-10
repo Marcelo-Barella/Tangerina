@@ -550,18 +550,12 @@ class VoiceCommandSink(BaseSink):
         while True:
             try:
                 await asyncio.sleep(CONNECTION_HEALTH_CHECK_INTERVAL)
-                if not self._voice_client or not self._voice_client.is_connected():
+                if not self._voice_client:
                     continue
-                current_time = time.time()
-                if self.last_audio_timestamps:
-                    last_audio_time = max(self.last_audio_timestamps.values())
-                    time_since_last_audio = current_time - last_audio_time
-                    if time_since_last_audio > CONNECTION_TIMEOUT:
-                        logger.warning(f"No audio received for {time_since_last_audio:.1f}s, triggering reconnection")
-                        await self._trigger_reconnection()
-                elif current_time - getattr(self, '_sink_created_time', current_time) > CONNECTION_TIMEOUT:
-                    logger.warning(f"No audio received since sink creation, triggering reconnection")
-                    await self._trigger_reconnection()
+                if self._voice_client.is_connected():
+                    continue
+                logger.warning("Voice client disconnected, triggering reconnection")
+                await self._trigger_reconnection()
             except asyncio.CancelledError:
                 break
             except Exception as e:

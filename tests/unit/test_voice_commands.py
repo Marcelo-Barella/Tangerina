@@ -508,6 +508,40 @@ class TestVoiceCommandSinkHealthMonitoring:
         assert sink._health_monitor_started is True
 
     @pytest.mark.asyncio
+    async def test_health_check_does_not_reconnect_on_silence(self, sink_instance):
+        sink, _, mock_vc, _ = sink_instance
+        mock_vc.is_connected.return_value = True
+        sink._trigger_reconnection = AsyncMock()
+
+        with patch('features.voice.voice_commands.CONNECTION_HEALTH_CHECK_INTERVAL', 0.01):
+            task = asyncio.create_task(sink._check_connection_health())
+            await asyncio.sleep(0.05)
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        sink._trigger_reconnection.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_health_check_reconnects_when_disconnected(self, sink_instance):
+        sink, _, mock_vc, _ = sink_instance
+        mock_vc.is_connected.return_value = False
+        sink._trigger_reconnection = AsyncMock()
+
+        with patch('features.voice.voice_commands.CONNECTION_HEALTH_CHECK_INTERVAL', 0.01):
+            task = asyncio.create_task(sink._check_connection_health())
+            await asyncio.sleep(0.05)
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        sink._trigger_reconnection.assert_called()
+
+    @pytest.mark.asyncio
     async def test_cancel_listening_task_cancels_and_removes(self, sink_instance):
         import asyncio
         sink, _, _, _ = sink_instance
