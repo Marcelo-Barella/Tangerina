@@ -8,7 +8,7 @@ except ImportError:
     requests = None
 
 
-def _ensure_output_path(output_path: Optional[str]) -> str:
+def ensure_output_path(output_path: Optional[str]) -> str:
     if output_path:
         return output_path
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
@@ -17,7 +17,7 @@ def _ensure_output_path(output_path: Optional[str]) -> str:
     return path
 
 
-def _cleanup_file(path: str) -> None:
+def cleanup_temp_file(path: str) -> None:
     try:
         if os.path.exists(path):
             os.remove(path)
@@ -35,7 +35,7 @@ def generate_speech_via_http(
     if requests is None:
         raise RuntimeError(f"requests library is required for {provider_name} HTTP mode")
 
-    output_path = _ensure_output_path(output_path)
+    output_path = ensure_output_path(output_path)
 
     try:
         response = requests.post(
@@ -67,5 +67,5 @@ def generate_speech_via_http(
     except requests.exceptions.RequestException as exc:
         raise RuntimeError(f"{provider_name} TTS API request failed: {exc}")
     except Exception:
-        _cleanup_file(output_path)
+        cleanup_temp_file(output_path)
         raise

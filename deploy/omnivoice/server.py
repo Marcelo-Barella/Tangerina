@@ -146,11 +146,10 @@ def tts() -> Tuple[Response, int] | Response:
 
     try:
         with _model_lock:
-            try:
-                audio = _generate_audio_timed(text)
-            except InferenceTimeout as exc:
-                exc.thread.join()
-                return jsonify({"error": "TTS generation timed out"}), 504
+            audio = _generate_audio_timed(text)
+    except InferenceTimeout as exc:
+        exc.thread.join()
+        return jsonify({"error": "TTS generation timed out"}), 504
     except RuntimeError as exc:
         if _load_error or _model_state is None:
             return jsonify({"error": _load_error or "Model is not loaded yet"}), 503

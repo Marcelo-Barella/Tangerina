@@ -1,6 +1,5 @@
 import os
 import logging
-import tempfile
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -10,7 +9,7 @@ try:
 except ImportError:
     requests = None
 
-from features.tts.http_tts import generate_speech_via_http
+from features.tts.http_tts import cleanup_temp_file, ensure_output_path, generate_speech_via_http
 
 logger = logging.getLogger(__name__)
 
@@ -52,23 +51,8 @@ class PiperTTS:
         except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.SubprocessError):
             return False
 
-    def _ensure_output_path(self, output_path: Optional[str]) -> str:
-        if output_path:
-            return output_path
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-        output_path = temp_file.name
-        temp_file.close()
-        return output_path
-
-    def _cleanup_file(self, path: str):
-        try:
-            if os.path.exists(path):
-                os.remove(path)
-        except OSError:
-            pass
-
     def _generate_via_subprocess(self, text: str, output_path: Optional[str] = None) -> str:
-        output_path = self._ensure_output_path(output_path)
+        output_path = ensure_output_path(output_path)
         
         try:
             process = subprocess.run(
@@ -87,7 +71,7 @@ class PiperTTS:
         except subprocess.TimeoutExpired:
             raise RuntimeError("TTS generation timed out")
         except Exception:
-            self._cleanup_file(output_path)
+            cleanup_temp_file(output_path)
             raise
 
     def generate_speech(self, text: str, output_path: Optional[str] = None) -> str:

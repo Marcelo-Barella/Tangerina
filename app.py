@@ -2,6 +2,7 @@ import os
 import logging
 import asyncio
 import threading
+from functools import partial
 from typing import Optional, Dict, Any
 import discord
 from discord import Intents
@@ -164,16 +165,10 @@ async def speak_tts(guild_id: int, channel_id: int, text: str, provider: Optiona
         music_bot, resolve_channel, music_bot.ytdl, YTDLSource
     )
 
-async def speak_piper_tts(guild_id: int, channel_id: int, text: str) -> Dict[str, Any]:
-    return await speak_tts(guild_id, channel_id, text, 'piper')
-
-async def speak_omnivoice_tts(guild_id: int, channel_id: int, text: str) -> Dict[str, Any]:
-    return await speak_tts(guild_id, channel_id, text, 'omnivoice')
-
-music_bot.speak_tts_func = speak_piper_tts
+music_bot.speak_tts_func = partial(speak_tts, provider='piper')
 
 flask_app, set_bot_loop = create_flask_app(
-    bot, music_bot, music_service, chatbot, speak_tts, speak_piper_tts, speak_omnivoice_tts
+    bot, music_bot, music_service, chatbot, speak_tts, 'omnivoice' in tts_providers
 )
 
 async def forward_to_n8n(msg_data: Dict[str, Any]) -> Optional[int]:
