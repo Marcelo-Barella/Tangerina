@@ -264,10 +264,14 @@ def create_flask_app(
             return jsonify({'error': 'text is required'}), 400
 
         omnivoice_timeout = int(os.getenv('OMNIVOICE_TIMEOUT', '90'))
-        omnivoice_response = run_async(
-            speak_omnivoice_tts_func(guild_id, channel_id, text),
-            timeout=omnivoice_timeout,
-        )
+        flask_timeout = omnivoice_timeout + 30
+        try:
+            omnivoice_response = run_async(
+                speak_omnivoice_tts_func(guild_id, channel_id, text),
+                timeout=flask_timeout,
+            )
+        except TimeoutError:
+            return jsonify({'success': False, 'error': 'OmniVoice TTS request timed out'}), 504
         return jsonify(omnivoice_response), 200 if omnivoice_response.get('success') else 500
 
     @flask_app.route('/chatbot/message', methods=['POST'])

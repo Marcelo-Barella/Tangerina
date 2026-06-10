@@ -1,5 +1,8 @@
-import pytest
+import asyncio
 import json
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 @pytest.mark.integration
 class TestHealthEndpoint:
@@ -205,6 +208,39 @@ class TestOmnivoiceSpeakEndpoint:
     def test_tts_omnivoice_speak_empty_text_returns_400(self, flask_client):
         response = flask_client.post('/tts/omnivoice/speak', json={'guild_id': 123, 'channel_id': 456, 'text': ''})
         assert response.status_code == 400
+
+    def test_tts_omnivoice_speak_timeout_returns_504(
+        self, mock_bot, mock_music_bot, mock_music_service
+    ):
+        from flask_routes import create_flask_app
+
+        speak_omnivoice = AsyncMock()
+        app, set_loop = create_flask_app(
+            mock_bot,
+            mock_music_bot,
+            mock_music_service,
+            MagicMock(),
+            AsyncMock(),
+            AsyncMock(),
+            speak_omnivoice,
+        )
+        set_loop(asyncio.get_event_loop())
+        app.config['TESTING'] = True
+
+        with patch('flask_routes.asyncio.run_coroutine_threadsafe') as mock_run:
+            mock_future = MagicMock()
+            mock_future.result.side_effect = TimeoutError()
+            mock_run.return_value = mock_future
+
+            with app.test_client() as client:
+                response = client.post(
+                    '/tts/omnivoice/speak',
+                    json={'guild_id': 123, 'channel_id': 456, 'text': 'test'},
+                )
+
+        assert response.status_code == 504
+        data = json.loads(response.data)
+        assert 'timed out' in data['error'].lower()
 
 @pytest.mark.integration
 class TestErrorHandling:
