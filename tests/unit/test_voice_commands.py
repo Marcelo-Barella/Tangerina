@@ -535,7 +535,6 @@ class TestVoiceCommandSinkHealthMonitoring:
 
     @pytest.mark.asyncio
     async def test_cancel_listening_task_cancels_and_removes(self, sink_instance):
-        import asyncio
         sink, _, _, _ = sink_instance
         
         async def dummy_task():

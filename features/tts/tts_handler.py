@@ -17,6 +17,10 @@ ELEVEN_MIXED_VOLUME = 0.5
 PIPER_MIXED_VOLUME = 0.2
 OMNIVOICE_MIXED_VOLUME = 0.2
 _TTS_PROVIDER_NAMES = {'piper': 'Piper', 'omnivoice': 'OmniVoice'}
+_LOCAL_TTS_CONFIG = {
+    'piper': (PIPER_CLEANUP_DELAY, PIPER_MIXED_VOLUME),
+    'omnivoice': (OMNIVOICE_CLEANUP_DELAY, OMNIVOICE_MIXED_VOLUME),
+}
 
 
 class MixedAudioSource(discord.AudioSource):
@@ -214,25 +218,12 @@ async def speak_tts_unified(
     ytdl,
     YTDLSource
 ) -> Dict[str, Any]:
-    if tts_provider == 'piper':
-        if 'piper' not in tts_providers or not tts_providers['piper']:
-            return {'success': False, 'error': 'Piper TTS not configured'}
-        
-        piper_tts = tts_providers['piper']
-        audio_path = await asyncio.to_thread(piper_tts.generate_speech, text)
-        cleanup_delay = PIPER_CLEANUP_DELAY
-        mixed_volume = PIPER_MIXED_VOLUME
-        audio_file = audio_path
-        use_ffmpeg_direct = True
-    elif tts_provider == 'omnivoice':
-        if 'omnivoice' not in tts_providers or not tts_providers['omnivoice']:
-            return {'success': False, 'error': 'OmniVoice TTS not configured'}
+    if tts_provider in _LOCAL_TTS_CONFIG:
+        if tts_provider not in tts_providers or not tts_providers[tts_provider]:
+            return {'success': False, 'error': f'{_TTS_PROVIDER_NAMES[tts_provider]} TTS not configured'}
 
-        omnivoice_tts = tts_providers['omnivoice']
-        audio_path = await asyncio.to_thread(omnivoice_tts.generate_speech, text)
-        cleanup_delay = OMNIVOICE_CLEANUP_DELAY
-        mixed_volume = OMNIVOICE_MIXED_VOLUME
-        audio_file = audio_path
+        cleanup_delay, mixed_volume = _LOCAL_TTS_CONFIG[tts_provider]
+        audio_file = await asyncio.to_thread(tts_providers[tts_provider].generate_speech, text)
         use_ffmpeg_direct = True
     else:
         if tts_generate is None or not ELEVEN_API_KEY:
@@ -265,11 +256,10 @@ async def speak_tts_unified(
         setup_error = 'Failed to join voice channel' if not voice_client else None
 
     if setup_error:
-        if tts_provider == 'omnivoice':
-            try:
-                os.remove(audio_file)
-            except OSError:
-                pass
+        try:
+            os.remove(audio_file)
+        except OSError:
+            pass
         return {'success': False, 'error': setup_error}
 
     music_source_info = music_bot.get_current_music_source(guild_id)

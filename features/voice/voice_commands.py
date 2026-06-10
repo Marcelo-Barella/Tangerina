@@ -515,12 +515,6 @@ class VoiceCommandSink(BaseSink):
         if voice_client and voice_client.is_connected():
             await self.speak_tts_func(self.guild_id, voice_client.channel.id, response)
 
-    async def _arm_health_monitor(self) -> None:
-        try:
-            self._reconnection_task = asyncio.create_task(self._check_connection_health())
-        except Exception as e:
-            logger.error(f"Error starting health monitor: {e}")
-
     def _start_health_monitor(self) -> None:
         if self._health_monitor_started:
             return
@@ -528,16 +522,23 @@ class VoiceCommandSink(BaseSink):
             self._health_monitor_started = True
             return
         self._health_monitor_started = True
+
+        async def _launch_monitor() -> None:
+            try:
+                self._reconnection_task = asyncio.create_task(self._check_connection_health())
+            except Exception as e:
+                logger.error(f"Error starting health monitor: {e}")
+
         loop = None
         if hasattr(self, 'music_bot_ref') and self.music_bot_ref and hasattr(self.music_bot_ref, 'main_loop'):
             loop = self.music_bot_ref.main_loop
         if not loop:
             loop = getattr(self.bot, 'loop', None)
         if loop and loop.is_running():
-            asyncio.run_coroutine_threadsafe(self._arm_health_monitor(), loop)
+            asyncio.run_coroutine_threadsafe(_launch_monitor(), loop)
             return
         try:
-            asyncio.get_running_loop().create_task(self._arm_health_monitor())
+            asyncio.get_running_loop().create_task(_launch_monitor())
         except RuntimeError:
             pass
 
@@ -576,12 +577,8 @@ class VoiceCommandSink(BaseSink):
             logger.error("Cannot reconnect: voice channel not available")
             return False
         try:
-            channel = self._voice_client.channel
             guild_id = self.guild_id
             logger.info(f"Reconnecting voice client for guild {guild_id}")
-            if self._voice_client.is_connected():
-                await self._voice_client.disconnect(force=True)
-            await asyncio.sleep(1)
             vc = await self.music_bot_ref.reconnect_voice_client(guild_id)
             if vc:
                 self._voice_client = vc
