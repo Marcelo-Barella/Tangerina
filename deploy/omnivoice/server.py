@@ -26,6 +26,7 @@ _model_ready = False
 _model_lock = threading.Lock()
 _load_error: Optional[str] = None
 _hung_inference_thread: Optional[threading.Thread] = None
+_RECOVERY_ERROR = "TTS service is recovering from a prior timeout"
 
 
 class InferenceTimeout(TimeoutError):
@@ -156,12 +157,7 @@ def health() -> Tuple[Response, int]:
     if _model_state is None or not _model_ready:
         return jsonify({"status": "loading"}), 503
     if _blocked_by_hung_inference():
-        return jsonify(
-            {
-                "status": "recovering",
-                "error": "TTS service is recovering from a prior timeout",
-            }
-        ), 503
+        return jsonify({"status": "recovering", "error": _RECOVERY_ERROR}), 503
 
     return jsonify(
         {
@@ -191,13 +187,10 @@ def tts() -> Tuple[Response, int] | Response:
     if not text:
         return jsonify({"error": "Text contains only unsupported characters"}), 400
 
-    if _blocked_by_hung_inference():
-        return jsonify({"error": "TTS service is recovering from a prior timeout"}), 503
-
     try:
         with _model_lock:
             if _blocked_by_hung_inference():
-                return jsonify({"error": "TTS service is recovering from a prior timeout"}), 503
+                return jsonify({"error": _RECOVERY_ERROR}), 503
             try:
                 audio = _generate_audio_timed(text)
             except InferenceTimeout as exc:

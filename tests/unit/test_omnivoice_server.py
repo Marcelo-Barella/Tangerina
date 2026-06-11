@@ -2,13 +2,26 @@ import importlib.util
 import sys
 import threading
 from pathlib import Path
-from types import ModuleType
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 SERVER_PATH = Path(__file__).resolve().parents[2] / "deploy" / "omnivoice" / "server.py"
 SERVER_MODULE = "omnivoice_server_under_test"
+
+
+def _start_hung_thread() -> tuple[threading.Thread, threading.Event]:
+    hang_started = threading.Event()
+    hang_release = threading.Event()
+
+    def hang_forever() -> None:
+        hang_started.set()
+        hang_release.wait(timeout=5)
+
+    hung_thread = threading.Thread(target=hang_forever)
+    hung_thread.start()
+    assert hang_started.wait(timeout=1)
+    return hung_thread, hang_release
 
 
 def _install_server_stubs() -> None:
@@ -70,16 +83,7 @@ class TestOmnivoiceServerHealth:
         assert "CUDA unavailable" in response.get_json()["error"]
 
     def test_health_returns_503_while_recovering_from_hung_inference(self, server):
-        hang_started = threading.Event()
-        hang_release = threading.Event()
-
-        def hang_forever() -> None:
-            hang_started.set()
-            hang_release.wait(timeout=5)
-
-        hung_thread = threading.Thread(target=hang_forever)
-        hung_thread.start()
-        assert hang_started.wait(timeout=1)
+        hung_thread, hang_release = _start_hung_thread()
 
         server._model_state = {
             "device": "cuda:0",
@@ -160,16 +164,7 @@ class TestOmnivoiceServerTtsValidation:
         assert response.mimetype == "audio/wav"
 
     def test_tts_timeout_returns_504_without_blocking_on_hung_thread(self, server):
-        hang_started = threading.Event()
-        hang_release = threading.Event()
-
-        def hang_forever() -> None:
-            hang_started.set()
-            hang_release.wait(timeout=5)
-
-        hung_thread = threading.Thread(target=hang_forever)
-        hung_thread.start()
-        assert hang_started.wait(timeout=1)
+        hung_thread, hang_release = _start_hung_thread()
 
         def raise_timeout(_text: str):
             raise server.InferenceTimeout(hung_thread)
