@@ -1,8 +1,9 @@
-import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+from tests.conftest import get_test_event_loop
 
 @pytest.mark.integration
 class TestHealthEndpoint:
@@ -223,7 +224,7 @@ class TestOmnivoiceSpeakEndpoint:
             speak_tts,
             True,
         )
-        set_loop(asyncio.get_event_loop())
+        set_loop(get_test_event_loop())
         app.config['TESTING'] = True
 
         with patch('flask_routes.asyncio.run_coroutine_threadsafe') as mock_run:
@@ -240,6 +241,98 @@ class TestOmnivoiceSpeakEndpoint:
         assert response.status_code == 504
         data = json.loads(response.data)
         assert 'timed out' in data['error'].lower()
+
+    def test_tts_omnivoice_speak_disabled_returns_503(
+        self, mock_bot, mock_music_bot, mock_music_service
+    ):
+        from flask_routes import create_flask_app
+
+        speak_tts = AsyncMock()
+        app, set_loop = create_flask_app(
+            mock_bot,
+            mock_music_bot,
+            mock_music_service,
+            MagicMock(),
+            speak_tts,
+            False,
+        )
+        set_loop(get_test_event_loop())
+        app.config['TESTING'] = True
+
+        with app.test_client() as client:
+            response = client.post(
+                '/tts/omnivoice/speak',
+                json={'guild_id': 123, 'channel_id': 456, 'text': 'test'},
+            )
+
+        assert response.status_code == 503
+        data = json.loads(response.data)
+        assert 'not configured' in data['error'].lower()
+        speak_tts.assert_not_called()
+
+    def test_tts_piper_speak_passes_provider_to_speak_tts(
+        self, mock_bot, mock_music_bot, mock_music_service
+    ):
+        from flask_routes import create_flask_app
+
+        speak_tts = AsyncMock(return_value={'success': True, 'message': 'Speaking with Piper...'})
+        app, set_loop = create_flask_app(
+            mock_bot,
+            mock_music_bot,
+            mock_music_service,
+            MagicMock(),
+            speak_tts,
+            True,
+        )
+        set_loop(get_test_event_loop())
+        app.config['TESTING'] = True
+
+        with patch('flask_routes.asyncio.run_coroutine_threadsafe') as mock_run:
+            mock_future = MagicMock()
+            mock_future.result.return_value = {'success': True, 'message': 'Speaking with Piper...'}
+            mock_run.return_value = mock_future
+
+            with app.test_client() as client:
+                response = client.post(
+                    '/tts/piper/speak',
+                    json={'guild_id': 123, 'channel_id': 456, 'text': 'test'},
+                )
+
+        assert response.status_code == 200
+        speak_tts.assert_called_once_with(123, 456, 'test', 'piper')
+
+    def test_tts_speak_failure_returns_500(
+        self, mock_bot, mock_music_bot, mock_music_service
+    ):
+        from flask_routes import create_flask_app
+
+        speak_tts = AsyncMock(return_value={'success': False, 'error': 'Failed to play TTS'})
+        app, set_loop = create_flask_app(
+            mock_bot,
+            mock_music_bot,
+            mock_music_service,
+            MagicMock(),
+            speak_tts,
+            True,
+        )
+        set_loop(get_test_event_loop())
+        app.config['TESTING'] = True
+
+        with patch('flask_routes.asyncio.run_coroutine_threadsafe') as mock_run:
+            mock_future = MagicMock()
+            mock_future.result.return_value = {'success': False, 'error': 'Failed to play TTS'}
+            mock_run.return_value = mock_future
+
+            with app.test_client() as client:
+                response = client.post(
+                    '/tts/speak',
+                    json={'guild_id': 123, 'channel_id': 456, 'text': 'test'},
+                )
+
+        assert response.status_code == 500
+        data = json.loads(response.data)
+        assert data['success'] is False
+        assert 'Failed to play TTS' in data['error']
 
 @pytest.mark.integration
 class TestErrorHandling:

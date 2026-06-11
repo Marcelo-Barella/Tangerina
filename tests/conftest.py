@@ -11,6 +11,16 @@ TEST_CHANNEL_ID = 987654321
 TEST_USER_ID = 515664341194768385
 EMBEDDING_DIM = 384
 
+
+def get_test_event_loop():
+    try:
+        return asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        return loop
+
+
 @pytest.fixture
 def mock_guild():
     guild = MagicMock()
@@ -52,7 +62,7 @@ def mock_bot():
     bot = MagicMock()
     bot.is_ready = MagicMock(return_value=True)
     bot.get_guild = bot.get_channel = MagicMock(return_value=None)
-    bot.loop = asyncio.get_event_loop()
+    bot.loop = get_test_event_loop()
     yield bot
     bot.reset_mock()
 
@@ -118,7 +128,7 @@ def flask_client(mock_bot, mock_music_bot, mock_music_service):
     speak_tts = AsyncMock()
 
     app, set_loop = create_flask_app(mock_bot, mock_music_bot, mock_music_service, chatbot, speak_tts, True)
-    set_loop(asyncio.get_event_loop())
+    set_loop(get_test_event_loop())
     app.config['TESTING'] = True
 
     with app.test_client() as client:
@@ -133,7 +143,7 @@ def flask_client_mocked_music(mock_bot, mock_music_bot, mock_music_service_succe
     speak_tts = AsyncMock(return_value={'success': True})
 
     app, set_loop = create_flask_app(mock_bot, mock_music_bot, mock_music_service_success, chatbot, speak_tts, True)
-    set_loop(asyncio.get_event_loop())
+    set_loop(get_test_event_loop())
     app.config['TESTING'] = True
 
     with app.test_client() as client:
@@ -148,7 +158,7 @@ def flask_client_integration_music(mock_bot, mock_music_bot, mock_music_service_
     speak_tts = AsyncMock(return_value={'success': False, 'error': 'Service unavailable'})
 
     app, set_loop = create_flask_app(mock_bot, mock_music_bot, mock_music_service_unavailable, chatbot, speak_tts, True)
-    set_loop(asyncio.get_event_loop())
+    set_loop(get_test_event_loop())
     app.config['TESTING'] = True
 
     with app.test_client() as client:
