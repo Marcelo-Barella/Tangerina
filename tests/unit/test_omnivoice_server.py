@@ -33,6 +33,16 @@ def _load_server_module():
     return module
 
 
+def _fake_named_tempfile(created_paths: list[str], tmp_path, **_kwargs):
+    handle = MagicMock()
+    path = str(tmp_path / f"temp-{len(created_paths)}.wav")
+    created_paths.append(path)
+    handle.name = path
+    handle.__enter__ = MagicMock(return_value=handle)
+    handle.__exit__ = MagicMock(return_value=False)
+    return handle
+
+
 @pytest.mark.unit
 class TestOmnivoiceServerHealth:
     @pytest.fixture
@@ -153,19 +163,14 @@ class TestOmnivoiceServerTtsValidation:
         server._generate_audio_timed = MagicMock(return_value=[b"\x00" * 16])
         created_paths: list[str] = []
 
-        def fake_named_tempfile(**kwargs):
-            handle = MagicMock()
-            path = str(tmp_path / f"temp-{len(created_paths)}.wav")
-            created_paths.append(path)
-            handle.name = path
-            handle.__enter__ = MagicMock(return_value=handle)
-            handle.__exit__ = MagicMock(return_value=False)
-            return handle
-
         def fail_write(*_args, **_kwargs):
             raise OSError("disk full")
 
-        with patch.object(server.tempfile, "NamedTemporaryFile", side_effect=fake_named_tempfile):
+        with patch.object(
+            server.tempfile,
+            "NamedTemporaryFile",
+            side_effect=lambda **kwargs: _fake_named_tempfile(created_paths, tmp_path, **kwargs),
+        ):
             sys.modules["soundfile"].write = fail_write
             client = server.app.test_client()
             response = client.post("/tts", json={"text": "hello"})

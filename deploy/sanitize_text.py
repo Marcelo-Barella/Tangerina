@@ -28,6 +28,7 @@ def sanitize_text(text: str) -> str:
 
 def unlink_temp(path: str) -> None:
     try:
-        os.remove(path)
+        if os.path.exists(path):
+            os.remove(path)
     except OSError:
         pass

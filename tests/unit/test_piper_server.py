@@ -29,6 +29,16 @@ def _load_server_module():
     return module
 
 
+def _fake_named_tempfile(created_paths: list[str], tmp_path, **_kwargs):
+    handle = MagicMock()
+    path = str(tmp_path / f"temp-{len(created_paths)}.wav")
+    created_paths.append(path)
+    handle.name = path
+    handle.__enter__ = MagicMock(return_value=handle)
+    handle.__exit__ = MagicMock(return_value=False)
+    return handle
+
+
 @pytest.mark.unit
 class TestPiperServerTts:
     @pytest.fixture
@@ -41,16 +51,6 @@ class TestPiperServerTts:
 
     def test_tts_returns_wav_on_success(self, server, tmp_path):
         created_paths: list[str] = []
-
-        def fake_named_tempfile(**kwargs):
-            handle = MagicMock()
-            path = str(tmp_path / f"temp-{len(created_paths)}.wav")
-            created_paths.append(path)
-            handle.name = path
-            handle.__enter__ = MagicMock(return_value=handle)
-            handle.__exit__ = MagicMock(return_value=False)
-            return handle
-
         mock_process = MagicMock()
         mock_process.returncode = 0
 
@@ -58,7 +58,11 @@ class TestPiperServerTts:
             Path(created_paths[-1]).write_bytes(b"RIFFWAVE")
             return mock_process
 
-        with patch.object(server.tempfile, "NamedTemporaryFile", side_effect=fake_named_tempfile):
+        with patch.object(
+            server.tempfile,
+            "NamedTemporaryFile",
+            side_effect=lambda **kwargs: _fake_named_tempfile(created_paths, tmp_path, **kwargs),
+        ):
             with patch.object(server.subprocess, "run", side_effect=create_output_on_run) as mock_run:
                 client = server.app.test_client()
                 response = client.post("/tts", json={"text": "hello"})
@@ -69,21 +73,15 @@ class TestPiperServerTts:
 
     def test_tts_subprocess_failure_unlinks_temp_file(self, server, tmp_path):
         created_paths: list[str] = []
-
-        def fake_named_tempfile(**kwargs):
-            handle = MagicMock()
-            path = str(tmp_path / f"temp-{len(created_paths)}.wav")
-            created_paths.append(path)
-            handle.name = path
-            handle.__enter__ = MagicMock(return_value=handle)
-            handle.__exit__ = MagicMock(return_value=False)
-            return handle
-
         mock_process = MagicMock()
         mock_process.returncode = 1
         mock_process.stderr = "piper failed"
 
-        with patch.object(server.tempfile, "NamedTemporaryFile", side_effect=fake_named_tempfile):
+        with patch.object(
+            server.tempfile,
+            "NamedTemporaryFile",
+            side_effect=lambda **kwargs: _fake_named_tempfile(created_paths, tmp_path, **kwargs),
+        ):
             with patch.object(server.subprocess, "run", return_value=mock_process):
                 client = server.app.test_client()
                 response = client.post("/tts", json={"text": "hello"})
@@ -95,16 +93,11 @@ class TestPiperServerTts:
     def test_tts_timeout_unlinks_temp_file(self, server, tmp_path):
         created_paths: list[str] = []
 
-        def fake_named_tempfile(**kwargs):
-            handle = MagicMock()
-            path = str(tmp_path / f"temp-{len(created_paths)}.wav")
-            created_paths.append(path)
-            handle.name = path
-            handle.__enter__ = MagicMock(return_value=handle)
-            handle.__exit__ = MagicMock(return_value=False)
-            return handle
-
-        with patch.object(server.tempfile, "NamedTemporaryFile", side_effect=fake_named_tempfile):
+        with patch.object(
+            server.tempfile,
+            "NamedTemporaryFile",
+            side_effect=lambda **kwargs: _fake_named_tempfile(created_paths, tmp_path, **kwargs),
+        ):
             with patch.object(
                 server.subprocess,
                 "run",
