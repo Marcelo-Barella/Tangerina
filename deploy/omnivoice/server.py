@@ -10,7 +10,8 @@ import torch
 from flask import Flask, Response, after_this_request, jsonify, request, send_file
 
 from model_loader import load_omnivoice_model
-from sanitize_text import sanitize_text, unlink_temp
+from sanitize_text import sanitize_text
+from temp_files import unlink_temp
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),

@@ -4,7 +4,8 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
-from features.tts.http_tts import HttpTTSClient, ensure_output_path, unlink_temp
+from features.tts.http_tts import HttpTTSClient
+from features.tts.temp_files import ensure_output_path, unlink_temp
 
 logger = logging.getLogger(__name__)
 

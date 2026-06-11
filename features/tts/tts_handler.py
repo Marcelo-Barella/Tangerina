@@ -6,7 +6,7 @@ import time
 from typing import Optional, Dict, Any
 import discord
 
-from features.tts.http_tts import unlink_temp
+from features.tts.temp_files import unlink_temp
 
 logger = logging.getLogger(__name__)
 

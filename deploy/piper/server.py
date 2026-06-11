@@ -7,7 +7,8 @@ from typing import Any, Dict, Tuple
 
 from flask import Flask, Response, after_this_request, jsonify, request, send_file
 
-from sanitize_text import sanitize_text, unlink_temp
+from sanitize_text import sanitize_text
+from temp_files import unlink_temp
 
 app = Flask(__name__)
 

@@ -4,7 +4,8 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "deploy"))
-from sanitize_text import sanitize_text, unlink_temp
+from sanitize_text import sanitize_text
+from temp_files import unlink_temp
 
 
 @pytest.mark.unit

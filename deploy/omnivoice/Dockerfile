@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir \
     --index-url ${TORCH_INDEX_URL} \
     && pip install --no-cache-dir -r /app/requirements.txt
 
-COPY sanitize_text.py omnivoice/model_loader.py omnivoice/quantize.py omnivoice/server.py /app/
+COPY sanitize_text.py temp_files.py omnivoice/model_loader.py omnivoice/quantize.py omnivoice/server.py /app/
 COPY omnivoice/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh /app/server.py
 

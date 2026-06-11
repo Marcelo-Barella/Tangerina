@@ -1,4 +1,3 @@
-import os
 import re
 
 _EMOJI_PATTERN = re.compile(
@@ -25,10 +24,3 @@ def sanitize_text(text: str) -> str:
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 
-
-def unlink_temp(path: str) -> None:
-    try:
-        if os.path.exists(path):
-            os.remove(path)
-    except OSError:
-        pass
