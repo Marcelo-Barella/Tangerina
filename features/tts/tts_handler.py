@@ -1,29 +1,30 @@
-import os
 import asyncio
-import tempfile
 import logging
+import subprocess
+import tempfile
+import time
 from typing import Optional, Dict, Any
 import discord
+
+from features.tts.http_tts import cleanup_tts_file
 
 logger = logging.getLogger(__name__)
 
 ELEVEN_CLEANUP_DELAY = 20
-PIPER_CLEANUP_DELAY = 5
-OMNIVOICE_CLEANUP_DELAY = 10
 MIXED_AUDIO_DELAY = 0.3
 MUSIC_VOLUME_REDUCED = 0.2
 ELEVEN_MIXED_VOLUME = 0.5
-PIPER_MIXED_VOLUME = 0.2
-OMNIVOICE_MIXED_VOLUME = 0.2
+
+HTTP_TTS_PROVIDERS = {
+    'piper': {'label': 'Piper', 'cleanup_delay': 5, 'mixed_volume': 0.2},
+    'omnivoice': {'label': 'OmniVoice', 'cleanup_delay': 10, 'mixed_volume': 0.2},
+}
 
 
 class MixedAudioSource(discord.AudioSource):
     FRAME_SIZE = 3840
     
     def __init__(self, music_url: str, tts_file: str, music_volume: float = 0.2):
-        import subprocess
-        import time
-        
         self.music_url = music_url
         self.tts_file = tts_file
         self.music_volume = music_volume
@@ -57,8 +58,7 @@ class MixedAudioSource(discord.AudioSource):
                 stderr_output = self.process.stderr.read().decode('utf-8', errors='ignore') if self.process.stderr else ''
                 logger.error(f"MixedAudioSource FFmpeg process died immediately: {stderr_output}")
                 raise Exception(f"FFmpeg process died immediately with return code {self.process.returncode}: {stderr_output[:500]}")
-            else:
-                logger.info(f"MixedAudioSource FFmpeg process started successfully (PID: {self.process.pid}, music_url: {music_url[:80]}...)")
+            logger.info(f"MixedAudioSource FFmpeg process started successfully (PID: {self.process.pid}, music_url: {music_url[:80]}...)")
         except Exception as e:
             logger.error(f"Error starting FFmpeg process for audio mixing: {e}")
             raise
@@ -78,7 +78,6 @@ class MixedAudioSource(discord.AudioSource):
     
     def cleanup(self):
         if self.process:
-            import subprocess
             try:
                 self.process.terminate()
                 self.process.wait(timeout=5)
@@ -169,35 +168,30 @@ async def _play_tts_with_mixing(
     ytdl,
     YTDLSource,
     music_volume: float,
-    cleanup_delay: float,
     cleanup_callback
 ):
     music_url = await _get_fresh_music_url(guild_id, current_song, music_source_info['url'], ytdl) if current_song else music_source_info['url']
     
     mixed_source = MixedAudioSource(music_url, tts_file, music_volume=music_volume)
-    if mixed_source:
-        def mixed_after_play(error):
-            if mixed_source:
-                mixed_source.cleanup()
-            cleanup_callback()
-            if current_song:
-                loop = music_bot.main_loop or asyncio.get_running_loop()
-                loop.call_soon_threadsafe(asyncio.create_task, _resume_music_after_tts(guild_id, current_song, voice_client, music_bot, YTDLSource))
-        
-        voice_client.stop()
-        await asyncio.sleep(MIXED_AUDIO_DELAY)
-        
-        try:
-            logger.info(f"Playing mixed source (music + TTS) for guild {guild_id}, music_url: {music_url[:80]}...")
-            voice_client.play(mixed_source, after=mixed_after_play)
-            logger.info(f"Mixed source playback started, is_playing: {voice_client.is_playing()}")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to play mixed source: {e}")
-            if mixed_source:
-                mixed_source.cleanup()
-            raise
-    return False
+
+    def mixed_after_play(error):
+        mixed_source.cleanup()
+        cleanup_callback()
+        if current_song:
+            loop = music_bot.main_loop or asyncio.get_running_loop()
+            loop.call_soon_threadsafe(asyncio.create_task, _resume_music_after_tts(guild_id, current_song, voice_client, music_bot, YTDLSource))
+
+    voice_client.stop()
+    await asyncio.sleep(MIXED_AUDIO_DELAY)
+
+    try:
+        logger.info(f"Playing mixed source (music + TTS) for guild {guild_id}, music_url: {music_url[:80]}...")
+        voice_client.play(mixed_source, after=mixed_after_play)
+        logger.info(f"Mixed source playback started, is_playing: {voice_client.is_playing()}")
+    except Exception as e:
+        logger.error(f"Failed to play mixed source: {e}")
+        mixed_source.cleanup()
+        raise
 
 
 async def speak_tts_unified(
@@ -217,25 +211,17 @@ async def speak_tts_unified(
     ytdl,
     YTDLSource
 ) -> Dict[str, Any]:
-    if tts_provider == 'piper':
-        if 'piper' not in tts_providers or not tts_providers['piper']:
-            return {'success': False, 'error': 'Piper TTS not configured'}
-        
-        piper_tts = tts_providers['piper']
-        audio_path = await asyncio.to_thread(piper_tts.generate_speech, text)
-        cleanup_delay = PIPER_CLEANUP_DELAY
-        mixed_volume = PIPER_MIXED_VOLUME
-        audio_file = audio_path
-        use_ffmpeg_direct = True
-    elif tts_provider == 'omnivoice':
-        if 'omnivoice' not in tts_providers or not tts_providers['omnivoice']:
-            return {'success': False, 'error': 'OmniVoice TTS not configured'}
+    http_provider = HTTP_TTS_PROVIDERS.get(tts_provider)
+    provider_label = http_provider['label'] if http_provider else 'ElevenLabs'
 
-        omnivoice_tts = tts_providers['omnivoice']
-        audio_path = await asyncio.to_thread(omnivoice_tts.generate_speech, text)
-        cleanup_delay = OMNIVOICE_CLEANUP_DELAY
-        mixed_volume = OMNIVOICE_MIXED_VOLUME
-        audio_file = audio_path
+    if http_provider:
+        cleanup_delay = http_provider['cleanup_delay']
+        mixed_volume = http_provider['mixed_volume']
+        if tts_provider not in tts_providers or not tts_providers[tts_provider]:
+            return {'success': False, 'error': f'{provider_label} TTS not configured'}
+
+        tts_client = tts_providers[tts_provider]
+        audio_file = await asyncio.to_thread(tts_client.generate_speech, text)
         use_ffmpeg_direct = True
     else:
         if tts_generate is None or not ELEVEN_API_KEY:
@@ -262,20 +248,14 @@ async def speak_tts_unified(
 
     resolved_channel_id, error = await _resolve_voice_channel(guild_id, channel_id)
     if error:
-        if tts_provider == 'omnivoice':
-            try:
-                os.remove(audio_file)
-            except OSError:
-                pass
+        if http_provider:
+            cleanup_tts_file(audio_file)
         return {'success': False, 'error': error}
     
     voice_client = await music_bot.join_voice_channel(guild_id, resolved_channel_id)
     if not voice_client:
-        if tts_provider == 'omnivoice':
-            try:
-                os.remove(audio_file)
-            except OSError:
-                pass
+        if http_provider:
+            cleanup_tts_file(audio_file)
         return {'success': False, 'error': 'Failed to join voice channel'}
 
     music_source_info = music_bot.get_current_music_source(guild_id)
@@ -293,10 +273,7 @@ async def speak_tts_unified(
 
         async def cleanup_tts():
             await asyncio.sleep(cleanup_delay)
-            try:
-                os.remove(audio_file)
-            except OSError:
-                pass
+            cleanup_tts_file(audio_file)
             if was_playing:
                 _restore_music_volume(guild_id, original_volume, music_bot)
 
@@ -306,7 +283,7 @@ async def speak_tts_unified(
         if use_mixing and music_source_info:
             current_song = music_bot.current_songs.get(guild_id)
             try:
-                success = await _play_tts_with_mixing(
+                await _play_tts_with_mixing(
                     guild_id,
                     voice_client,
                     music_source_info,
@@ -316,16 +293,9 @@ async def speak_tts_unified(
                     ytdl,
                     YTDLSource,
                     mixed_volume,
-                    cleanup_delay,
                     after_play
                 )
-                if success:
-                    provider_name = (
-                        'Piper' if tts_provider == 'piper'
-                        else 'OmniVoice' if tts_provider == 'omnivoice'
-                        else 'ElevenLabs'
-                    )
-                    return {'success': True, 'message': f'Speaking with {provider_name} and music...'}
+                return {'success': True, 'message': f'Speaking with {provider_label} and music...'}
             except Exception as e:
                 logger.warning(f"Failed to create mixed audio source, falling back to pause/resume: {e}")
 
@@ -338,12 +308,7 @@ async def speak_tts_unified(
             player = discord.PCMVolumeTransformer(discord.FFmpegPCMAudio(audio_file, options='-vn'), volume=1.0)
         
         voice_client.play(player, after=after_play)
-        provider_name = (
-            'Piper' if tts_provider == 'piper'
-            else 'OmniVoice' if tts_provider == 'omnivoice'
-            else 'ElevenLabs'
-        )
-        return {'success': True, 'message': f'Speaking with {provider_name}...'}
+        return {'success': True, 'message': f'Speaking with {provider_label}...'}
     except Exception as e:
         logger.error(f"Error playing TTS: {e}")
         if was_playing:

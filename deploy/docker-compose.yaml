@@ -36,8 +36,8 @@ services:
 
   piper-tts:
     build:
-      context: ./piper
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: piper/Dockerfile
     container_name: tangerina-piper-tts
     restart: unless-stopped
     environment:
@@ -59,8 +59,8 @@ services:
 
   omnivoice-tts:
     build:
-      context: ./omnivoice
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: omnivoice/Dockerfile
     container_name: tangerina-omnivoice-tts
     restart: unless-stopped
     environment:

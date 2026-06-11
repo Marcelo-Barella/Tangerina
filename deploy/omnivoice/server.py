@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 import logging
 import os
-import re
-import sys
 import tempfile
 import threading
 from typing import Any, Dict, Optional, Tuple
@@ -12,6 +10,7 @@ import torch
 from flask import Flask, Response, after_this_request, jsonify, request, send_file
 
 from model_loader import load_omnivoice_model
+from sanitize_text import sanitize_text, unlink_temp
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
@@ -34,43 +33,24 @@ class InferenceTimeout(TimeoutError):
         self.thread = thread
 
 
-def sanitize_text(text: str) -> str:
-    emoji_pattern = re.compile(
-        "["
-        "\U0001F600-\U0001F64F"
-        "\U0001F300-\U0001F5FF"
-        "\U0001F680-\U0001F6FF"
-        "\U0001F1E0-\U0001F1FF"
-        "\U00002702-\U000027B0"
-        "\U000024C2-\U0001F251"
-        "\U0001F900-\U0001F9FF"
-        "\U0001FA00-\U0001FA6F"
-        "\U0001FA70-\U0001FAFF"
-        "\U00002600-\U000026FF"
-        "\U00002700-\U000027BF"
-        "]+",
-        flags=re.UNICODE,
-    )
-    text = emoji_pattern.sub("", text)
-    text = re.sub(r"[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]", "", text)
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()
+def _generation_kwargs(text: str) -> Dict[str, Any]:
+    return {
+        "text": text,
+        "instruct": os.getenv("OMNIVOICE_INSTRUCT", "female, brazilian accent"),
+        "num_step": int(os.getenv("OMNIVOICE_NUM_STEP", "16")),
+        "speed": float(os.getenv("OMNIVOICE_SPEED", "1.0")),
+    }
 
 
 def _warmup_model() -> None:
     global _model_state, _model_ready, _load_error
     try:
         _model_state = load_omnivoice_model()
-        instruct = os.getenv("OMNIVOICE_INSTRUCT", "female, brazilian accent")
         model = _model_state["model"]
-        logger.info("Warming up OmniVoice with voice design instruct=%r", instruct)
+        kwargs = _generation_kwargs("warmup")
+        logger.info("Warming up OmniVoice with voice design instruct=%r", kwargs["instruct"])
         with _model_lock:
-            model.generate(
-                text="warmup",
-                instruct=instruct,
-                num_step=int(os.getenv("OMNIVOICE_NUM_STEP", "16")),
-                speed=float(os.getenv("OMNIVOICE_SPEED", "1.0")),
-            )
+            model.generate(**kwargs)
         _model_ready = True
         logger.info("OmniVoice warmup complete")
     except Exception as exc:
@@ -104,13 +84,7 @@ def _generate_audio(text: str):
     state = _get_model_state()
     model = state["model"]
     device = state["device"]
-    instruct = os.getenv("OMNIVOICE_INSTRUCT", "female, brazilian accent")
-    kwargs = {
-        "text": text,
-        "instruct": instruct,
-        "num_step": int(os.getenv("OMNIVOICE_NUM_STEP", "16")),
-        "speed": float(os.getenv("OMNIVOICE_SPEED", "1.0")),
-    }
+    kwargs = _generation_kwargs(text)
     try:
         return model.generate(**kwargs)
     except RuntimeError as exc:
@@ -130,23 +104,23 @@ def _generate_audio(text: str):
 
 
 def _generate_audio_timed(text: str):
-    result: list = []
-    error: list = []
+    audio_output: list = []
+    generation_error: list = []
 
     def _run() -> None:
         try:
-            result.append(_generate_audio(text))
+            audio_output.append(_generate_audio(text))
         except Exception as exc:
-            error.append(exc)
+            generation_error.append(exc)
 
     thread = threading.Thread(target=_run, daemon=True)
     thread.start()
     thread.join(_inference_timeout_seconds())
     if thread.is_alive():
         raise InferenceTimeout(thread)
-    if error:
-        raise error[0]
-    return result[0]
+    if generation_error:
+        raise generation_error[0]
+    return audio_output[0]
 
 
 @app.route("/health", methods=["GET"])
@@ -170,13 +144,13 @@ def health() -> Tuple[Response, int]:
 
 @app.route("/tts", methods=["POST"])
 def tts() -> Tuple[Response, int] | Response:
-    data: Dict[str, Any] | None = request.get_json(silent=True)
-    if not data:
+    payload: Dict[str, Any] | None = request.get_json(silent=True)
+    if not payload:
         return jsonify({"error": "Missing JSON body"}), 400
-    if "text" not in data:
+    if "text" not in payload:
         return jsonify({"error": "Missing 'text' field"}), 400
 
-    text = data["text"]
+    text = payload["text"]
     if not isinstance(text, str) or not text.strip():
         return jsonify({"error": "Text must be a non-empty string"}), 400
 
@@ -220,18 +194,12 @@ def tts() -> Tuple[Response, int] | Response:
     try:
         sf.write(output_path, waveform, 24000)
     except Exception as exc:
-        try:
-            os.remove(output_path)
-        except OSError:
-            pass
+        unlink_temp(output_path)
         return jsonify({"error": str(exc)}), 500
 
     @after_this_request
     def _remove_temp_file(response):
-        try:
-            os.remove(output_path)
-        except OSError:
-            pass
+        unlink_temp(output_path)
         return response
 
     return send_file(

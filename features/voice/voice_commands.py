@@ -518,7 +518,7 @@ class VoiceCommandSink(BaseSink):
             return
         voice_client = self.music_service.music_bot.voice_clients.get(self.guild_id)
         if voice_client and voice_client.is_connected():
-            await self.speak_tts_func(self.guild_id, voice_client.channel.id, response)
+            await self.speak_tts_func(self.guild_id, voice_client.channel.id, response, 'piper')
 
     def _start_health_monitor(self) -> None:
         if self._health_monitor_started:

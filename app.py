@@ -51,9 +51,9 @@ except ImportError:
     PiperTTS = None
 
 try:
-    from features.tts.omnivoice_tts import OmnivoiceTTS
+    from features.tts.http_tts import create_omnivoice_client
 except ImportError:
-    OmnivoiceTTS = None
+    create_omnivoice_client = None
 
 from features.music.music_bot import MusicBot, YTDLSource
 from features.music.music_service import MusicService, _resolve_voice_channel
@@ -144,43 +144,34 @@ elif TTS_PROVIDER == 'piper' and PiperTTS:
         logger.info("Piper TTS enabled")
     except Exception as e:
         logger.warning(f"Piper TTS disabled: {e}")
-elif TTS_PROVIDER == 'omnivoice' and OmnivoiceTTS:
+if create_omnivoice_client and (
+    TTS_PROVIDER == 'omnivoice' or os.getenv('OMNIVOICE_API_URL')
+):
     try:
-        tts_providers['omnivoice'] = OmnivoiceTTS()
-        logger.info("OmniVoice TTS enabled")
+        tts_providers['omnivoice'] = create_omnivoice_client()
+        if TTS_PROVIDER == 'omnivoice':
+            logger.info("OmniVoice TTS enabled")
+        else:
+            logger.info("OmniVoice TTS sidecar client enabled for /tts/omnivoice/speak")
     except Exception as e:
         logger.warning(f"OmniVoice TTS disabled: {e}")
-
-if OmnivoiceTTS and os.getenv('OMNIVOICE_API_URL') and 'omnivoice' not in tts_providers:
-    try:
-        tts_providers['omnivoice'] = OmnivoiceTTS()
-        logger.info("OmniVoice TTS sidecar client enabled for /tts/omnivoice/speak")
-    except Exception as e:
-        logger.warning(f"OmniVoice TTS sidecar client disabled: {e}")
 
 music_bot.chatbot = chatbot
 music_bot.tts_providers = tts_providers
 
 async def speak_tts(guild_id: int, channel_id: int, text: str, provider: Optional[str] = None) -> Dict[str, Any]:
-    async def resolve_channel(gid: int, cid: int) -> tuple[Optional[int], Optional[str]]:
-        return await _resolve_voice_channel(gid, cid, bot, music_bot)
     return await speak_tts_unified(
         guild_id, channel_id, text, provider or TTS_PROVIDER, tts_providers,
         tts_generate, set_eleven_api_key, ELEVEN_API_KEY,
         "iP95p4xoKVk53GoZ742B", "eleven_multilingual_v2", "mp3_44100_128",
-        music_bot, resolve_channel, music_bot.ytdl, YTDLSource
+        music_bot, lambda gid, cid: _resolve_voice_channel(gid, cid, bot, music_bot),
+        music_bot.ytdl, YTDLSource
     )
 
-async def speak_piper_tts(guild_id: int, channel_id: int, text: str) -> Dict[str, Any]:
-    return await speak_tts(guild_id, channel_id, text, 'piper')
-
-async def speak_omnivoice_tts(guild_id: int, channel_id: int, text: str) -> Dict[str, Any]:
-    return await speak_tts(guild_id, channel_id, text, 'omnivoice')
-
-music_bot.speak_tts_func = speak_piper_tts
+music_bot.speak_tts_func = speak_tts
 
 flask_app, set_bot_loop = create_flask_app(
-    bot, music_bot, music_service, chatbot, speak_tts, speak_piper_tts, speak_omnivoice_tts
+    bot, music_bot, music_service, chatbot, speak_tts, 'omnivoice' in tts_providers
 )
 
 async def forward_to_n8n(msg_data: Dict[str, Any]) -> Optional[int]:

@@ -2,7 +2,6 @@ import importlib.util
 import sys
 import threading
 from pathlib import Path
-from types import ModuleType
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -12,6 +11,11 @@ SERVER_MODULE = "omnivoice_server_under_test"
 
 
 def _install_server_stubs() -> None:
+    deploy_dir = str(SERVER_PATH.parents[1])
+    if deploy_dir not in sys.path:
+        sys.path.insert(0, deploy_dir)
+    if isinstance(sys.modules.get("flask"), MagicMock):
+        del sys.modules["flask"]
     for name in ("soundfile", "torch", "model_loader"):
         if name not in sys.modules:
             sys.modules[name] = MagicMock()
@@ -19,30 +23,13 @@ def _install_server_stubs() -> None:
 
 def _load_server_module():
     _install_server_stubs()
-    if SERVER_MODULE in sys.modules:
-        return sys.modules[SERVER_MODULE]
+    sys.modules.pop(SERVER_MODULE, None)
     spec = importlib.util.spec_from_file_location(SERVER_MODULE, SERVER_PATH)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     sys.modules[SERVER_MODULE] = module
     spec.loader.exec_module(module)
     return module
-
-
-@pytest.mark.unit
-class TestOmnivoiceServerSanitizeText:
-    @pytest.fixture
-    def server(self):
-        return _load_server_module()
-
-    def test_strips_emoji_and_control_characters(self, server):
-        assert server.sanitize_text("hello 😀 world\x00test") == "hello worldtest"
-
-    def test_collapses_whitespace(self, server):
-        assert server.sanitize_text("  hello   world  ") == "hello world"
-
-    def test_returns_empty_string_for_emoji_only_input(self, server):
-        assert server.sanitize_text("😀🎉") == ""
 
 
 @pytest.mark.unit

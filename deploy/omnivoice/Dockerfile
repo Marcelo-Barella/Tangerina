@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y \
     libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt /app/requirements.txt
+COPY omnivoice/requirements.txt /app/requirements.txt
 
 ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cu124
 RUN pip install --no-cache-dir \
@@ -15,7 +15,8 @@ RUN pip install --no-cache-dir \
     --index-url ${TORCH_INDEX_URL} \
     && pip install --no-cache-dir -r /app/requirements.txt
 
-COPY model_loader.py quantize.py server.py entrypoint.sh /app/
+COPY sanitize_text.py omnivoice/model_loader.py omnivoice/quantize.py omnivoice/server.py /app/
+COPY omnivoice/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh /app/server.py
 
 ENV OMNIVOICE_PORT=5003

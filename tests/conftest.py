@@ -115,9 +115,9 @@ def flask_client(mock_bot, mock_music_bot, mock_music_service):
 
     chatbot = MagicMock()
     chatbot.generate_response = AsyncMock(return_value="Test response")
-    speak_funcs = [AsyncMock() for _ in range(3)]
+    speak_tts = AsyncMock()
 
-    app, set_loop = create_flask_app(mock_bot, mock_music_bot, mock_music_service, chatbot, *speak_funcs)
+    app, set_loop = create_flask_app(mock_bot, mock_music_bot, mock_music_service, chatbot, speak_tts, True)
     set_loop(asyncio.get_event_loop())
     app.config['TESTING'] = True
 
@@ -130,9 +130,9 @@ def flask_client_mocked_music(mock_bot, mock_music_bot, mock_music_service_succe
 
     chatbot = MagicMock()
     chatbot.generate_response = AsyncMock(return_value="Test response")
-    speak_funcs = [AsyncMock(return_value={'success': True}) for _ in range(3)]
+    speak_tts = AsyncMock(return_value={'success': True})
 
-    app, set_loop = create_flask_app(mock_bot, mock_music_bot, mock_music_service_success, chatbot, *speak_funcs)
+    app, set_loop = create_flask_app(mock_bot, mock_music_bot, mock_music_service_success, chatbot, speak_tts, True)
     set_loop(asyncio.get_event_loop())
     app.config['TESTING'] = True
 
@@ -145,9 +145,9 @@ def flask_client_integration_music(mock_bot, mock_music_bot, mock_music_service_
 
     chatbot = MagicMock()
     chatbot.generate_response = AsyncMock(return_value="Test response")
-    speak_funcs = [AsyncMock(return_value={'success': False, 'error': 'Service unavailable'}) for _ in range(3)]
+    speak_tts = AsyncMock(return_value={'success': False, 'error': 'Service unavailable'})
 
-    app, set_loop = create_flask_app(mock_bot, mock_music_bot, mock_music_service_unavailable, chatbot, *speak_funcs)
+    app, set_loop = create_flask_app(mock_bot, mock_music_bot, mock_music_service_unavailable, chatbot, speak_tts, True)
     set_loop(asyncio.get_event_loop())
     app.config['TESTING'] = True
 
