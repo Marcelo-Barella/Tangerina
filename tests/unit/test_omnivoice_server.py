@@ -69,6 +69,39 @@ class TestOmnivoiceServerHealth:
         assert response.get_json()["status"] == "error"
         assert "CUDA unavailable" in response.get_json()["error"]
 
+    def test_health_returns_503_while_recovering_from_hung_inference(self, server):
+        hang_started = threading.Event()
+        hang_release = threading.Event()
+
+        def hang_forever() -> None:
+            hang_started.set()
+            hang_release.wait(timeout=5)
+
+        hung_thread = threading.Thread(target=hang_forever)
+        hung_thread.start()
+        assert hang_started.wait(timeout=1)
+
+        server._model_state = {
+            "device": "cuda:0",
+            "precision": "int8",
+            "model_id": "test-model",
+            "vram_estimate_gb": 6,
+        }
+        server._model_ready = True
+        server._hung_inference_thread = hung_thread
+
+        client = server.app.test_client()
+        response = client.get("/health")
+        assert response.status_code == 503
+        assert response.get_json()["status"] == "recovering"
+
+        hang_release.set()
+        hung_thread.join(timeout=2)
+
+        response2 = client.get("/health")
+        assert response2.status_code == 200
+        assert response2.get_json()["status"] == "ok"
+
     def test_health_returns_ok_when_model_is_ready(self, server):
         server._model_state = {
             "device": "cuda:0",
