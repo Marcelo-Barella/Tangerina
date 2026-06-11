@@ -7,10 +7,10 @@ from typing import Any, Dict, Optional, Tuple
 
 import soundfile as sf
 import torch
-from flask import Flask, Response, after_this_request, jsonify, request, send_file
+from flask import Flask, Response, jsonify, send_file
 
 from model_loader import load_omnivoice_model
-from sanitize_text import sanitize_text
+from server_utils import parse_tts_text_request, register_temp_cleanup, safe_remove
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
@@ -144,22 +144,9 @@ def health() -> Tuple[Response, int]:
 
 @app.route("/tts", methods=["POST"])
 def tts() -> Tuple[Response, int] | Response:
-    payload: Dict[str, Any] | None = request.get_json(silent=True)
-    if not payload:
-        return jsonify({"error": "Missing JSON body"}), 400
-    if "text" not in payload:
-        return jsonify({"error": "Missing 'text' field"}), 400
-
-    text = payload["text"]
-    if not isinstance(text, str) or not text.strip():
-        return jsonify({"error": "Text must be a non-empty string"}), 400
-
-    text = sanitize_text(text)
-    if not text:
-        return jsonify({"error": "Text contains only unsupported characters"}), 400
-
-    if _blocked_by_hung_inference():
-        return jsonify({"error": "TTS service is recovering from a prior timeout"}), 503
+    text, error = parse_tts_text_request()
+    if error:
+        return error
 
     try:
         with _model_lock:
@@ -194,20 +181,10 @@ def tts() -> Tuple[Response, int] | Response:
     try:
         sf.write(output_path, waveform, 24000)
     except Exception as exc:
-        try:
-            os.remove(output_path)
-        except OSError:
-            pass
+        safe_remove(output_path)
         return jsonify({"error": str(exc)}), 500
 
-    @after_this_request
-    def _remove_temp_file(response):
-        try:
-            os.remove(output_path)
-        except OSError:
-            pass
-        return response
-
+    register_temp_cleanup(output_path)
     return send_file(
         output_path,
         mimetype="audio/wav",

@@ -23,7 +23,7 @@ class HttpTTSClient:
             raise RuntimeError(f"requests library is required for {self.provider_name} HTTP mode")
 
         output_path = ensure_output_path(output_path)
-
+        written = False
         try:
             response = requests.post(
                 f"{self.api_url}/tts",
@@ -33,21 +33,19 @@ class HttpTTSClient:
             )
 
             if response.status_code != 200:
-                try:
-                    error_msg = response.json().get("error", f"HTTP {response.status_code}")
-                except ValueError:
-                    error_msg = f"HTTP {response.status_code}: {response.text[:100]}"
+                error_msg = _parse_error_response(response)
                 raise RuntimeError(f"{self.provider_name} TTS API error: {error_msg}")
 
-            with open(output_path, "wb") as handle:
+            with open(output_path, "wb") as wav_file:
                 for chunk in response.iter_content(chunk_size=8192):
-                    handle.write(chunk)
+                    wav_file.write(chunk)
 
             if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
                 raise RuntimeError(
                     f"Received empty or invalid audio file from {self.provider_name} TTS API"
                 )
 
+            written = True
             return output_path
         except requests.exceptions.Timeout:
             raise RuntimeError("TTS generation timed out")
@@ -57,9 +55,16 @@ class HttpTTSClient:
             )
         except requests.exceptions.RequestException as exc:
             raise RuntimeError(f"{self.provider_name} TTS API request failed: {exc}")
-        except Exception:
-            cleanup_tts_file(output_path)
-            raise
+        finally:
+            if not written:
+                cleanup_tts_file(output_path)
+
+
+def _parse_error_response(response) -> str:
+    try:
+        return response.json().get("error", f"HTTP {response.status_code}")
+    except ValueError:
+        return f"HTTP {response.status_code}: {response.text[:100]}"
 
 
 def create_omnivoice_client(
@@ -90,4 +95,3 @@ def cleanup_tts_file(path: str) -> None:
             os.remove(path)
     except OSError:
         pass
-

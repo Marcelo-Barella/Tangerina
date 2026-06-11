@@ -40,8 +40,8 @@ class PiperTTS:
 
     def _check_executable(self, path: str) -> bool:
         try:
-            result = subprocess.run([path, "--help"], capture_output=True, text=True, timeout=5)
-            return result.returncode == 0
+            probe = subprocess.run([path, "--help"], capture_output=True, text=True, timeout=5)
+            return probe.returncode == 0
         except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.SubprocessError):
             return False
 
