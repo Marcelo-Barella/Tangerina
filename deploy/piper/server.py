@@ -5,7 +5,7 @@ import sys
 import tempfile
 from typing import Any, Dict, Tuple
 
-from flask import Flask, Response, jsonify, request, send_file
+from flask import Flask, Response, after_this_request, jsonify, request, send_file
 
 from sanitize_text import sanitize_text
 
@@ -63,10 +63,22 @@ def tts() -> Tuple[Response, int] | Response:
         
         if process.returncode != 0:
             error_msg = (process.stderr or "").strip() or "piper failed"
+            try:
+                os.remove(output_path)
+            except OSError:
+                pass
             return jsonify({"error": error_msg}), 500
         
         if not os.path.exists(output_path):
             return jsonify({"error": "Audio file not generated"}), 500
+
+        @after_this_request
+        def _remove_temp_file(response):
+            try:
+                os.remove(output_path)
+            except OSError:
+                pass
+            return response
         
         return send_file(
             output_path,
@@ -75,8 +87,16 @@ def tts() -> Tuple[Response, int] | Response:
             download_name="output.wav"
         )
     except subprocess.TimeoutExpired:
+        try:
+            os.remove(output_path)
+        except OSError:
+            pass
         return jsonify({"error": "TTS generation timed out"}), 504
     except Exception as exc:
+        try:
+            os.remove(output_path)
+        except OSError:
+            pass
         return jsonify({"error": str(exc)}), 500
 
 if __name__ == "__main__":
