@@ -70,6 +70,13 @@ def _inference_timeout_seconds() -> int:
     return int(os.getenv("OMNIVOICE_TIMEOUT", "90"))
 
 
+def _unlink(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
 def _blocked_by_hung_inference() -> bool:
     global _hung_inference_thread
     if _hung_inference_thread is None:
@@ -194,18 +201,12 @@ def tts() -> Tuple[Response, int] | Response:
     try:
         sf.write(output_path, waveform, 24000)
     except Exception as exc:
-        try:
-            os.remove(output_path)
-        except OSError:
-            pass
+        _unlink(output_path)
         return jsonify({"error": str(exc)}), 500
 
     @after_this_request
     def _remove_temp_file(response):
-        try:
-            os.remove(output_path)
-        except OSError:
-            pass
+        _unlink(output_path)
         return response
 
     return send_file(

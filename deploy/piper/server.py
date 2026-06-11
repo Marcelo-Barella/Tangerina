@@ -14,6 +14,14 @@ app = Flask(__name__)
 PIPER_BIN = os.getenv("PIPER_BIN", "/usr/local/bin/piper")
 PIPER_MODEL_PATH = os.getenv("PIPER_MODEL_PATH", "/app/models/pt_BR-faber-medium.onnx")
 
+
+def _unlink(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
 @app.route("/health", methods=["GET"])
 def health() -> Tuple[Response, int]:
     return jsonify({"status": "ok"}), 200
@@ -63,21 +71,16 @@ def tts() -> Tuple[Response, int] | Response:
         
         if process.returncode != 0:
             error_msg = (process.stderr or "").strip() or "piper failed"
-            try:
-                os.remove(output_path)
-            except OSError:
-                pass
+            _unlink(output_path)
             return jsonify({"error": error_msg}), 500
-        
+
         if not os.path.exists(output_path):
+            _unlink(output_path)
             return jsonify({"error": "Audio file not generated"}), 500
 
         @after_this_request
         def _remove_temp_file(response):
-            try:
-                os.remove(output_path)
-            except OSError:
-                pass
+            _unlink(output_path)
             return response
         
         return send_file(
@@ -87,16 +90,10 @@ def tts() -> Tuple[Response, int] | Response:
             download_name="output.wav"
         )
     except subprocess.TimeoutExpired:
-        try:
-            os.remove(output_path)
-        except OSError:
-            pass
+        _unlink(output_path)
         return jsonify({"error": "TTS generation timed out"}), 504
     except Exception as exc:
-        try:
-            os.remove(output_path)
-        except OSError:
-            pass
+        _unlink(output_path)
         return jsonify({"error": str(exc)}), 500
 
 if __name__ == "__main__":

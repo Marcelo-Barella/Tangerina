@@ -58,8 +58,7 @@ class MixedAudioSource(discord.AudioSource):
                 stderr_output = self.process.stderr.read().decode('utf-8', errors='ignore') if self.process.stderr else ''
                 logger.error(f"MixedAudioSource FFmpeg process died immediately: {stderr_output}")
                 raise Exception(f"FFmpeg process died immediately with return code {self.process.returncode}: {stderr_output[:500]}")
-            else:
-                logger.info(f"MixedAudioSource FFmpeg process started successfully (PID: {self.process.pid}, music_url: {music_url[:80]}...)")
+            logger.info(f"MixedAudioSource FFmpeg process started successfully (PID: {self.process.pid}, music_url: {music_url[:80]}...)")
         except Exception as e:
             logger.error(f"Error starting FFmpeg process for audio mixing: {e}")
             raise
