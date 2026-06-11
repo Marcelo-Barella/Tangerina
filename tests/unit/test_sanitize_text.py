@@ -17,3 +17,6 @@ class TestSanitizeText:
 
     def test_returns_empty_string_for_emoji_only_input(self):
         assert sanitize_text("😀🎉") == ""
+
+    def test_preserves_portuguese_text(self):
+        assert sanitize_text("Olá, tudo bem?") == "Olá, tudo bem?"
