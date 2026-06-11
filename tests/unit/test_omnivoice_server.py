@@ -1,5 +1,6 @@
 import importlib.util
 import sys
+import threading
 from pathlib import Path
 from types import ModuleType
 from unittest.mock import MagicMock, patch
@@ -124,3 +125,35 @@ class TestOmnivoiceServerTtsValidation:
         response = client.post("/tts", json={"text": "hello"})
         assert response.status_code == 200
         assert response.mimetype == "audio/wav"
+
+    def test_tts_timeout_returns_504_without_blocking_on_hung_thread(self, server):
+        hang_started = threading.Event()
+        hang_release = threading.Event()
+
+        def hang_forever() -> None:
+            hang_started.set()
+            hang_release.wait(timeout=5)
+
+        hung_thread = threading.Thread(target=hang_forever)
+        hung_thread.start()
+        assert hang_started.wait(timeout=1)
+
+        def raise_timeout(_text: str):
+            raise server.InferenceTimeout(hung_thread)
+
+        server._generate_audio_timed = raise_timeout
+        client = server.app.test_client()
+
+        response = client.post("/tts", json={"text": "hello"})
+        assert response.status_code == 504
+        assert response.get_json()["error"] == "TTS generation timed out"
+
+        response2 = client.post("/tts", json={"text": "hello again"})
+        assert response2.status_code == 503
+        assert "recovering" in response2.get_json()["error"]
+
+        hang_release.set()
+        hung_thread.join(timeout=2)
+
+        response3 = client.post("/tts", json={"text": "recovered"})
+        assert response3.status_code == 504

@@ -25,6 +25,7 @@ _model_state: Optional[Dict[str, Any]] = None
 _model_ready = False
 _model_lock = threading.Lock()
 _load_error: Optional[str] = None
+_hung_inference_thread: Optional[threading.Thread] = None
 
 
 class InferenceTimeout(TimeoutError):
@@ -87,6 +88,16 @@ def _get_model_state() -> Dict[str, Any]:
 
 def _inference_timeout_seconds() -> int:
     return int(os.getenv("OMNIVOICE_TIMEOUT", "90"))
+
+
+def _blocked_by_hung_inference() -> bool:
+    global _hung_inference_thread
+    if _hung_inference_thread is None:
+        return False
+    if not _hung_inference_thread.is_alive():
+        _hung_inference_thread = None
+        return False
+    return True
 
 
 def _generate_audio(text: str):
@@ -173,12 +184,22 @@ def tts() -> Tuple[Response, int] | Response:
     if not text:
         return jsonify({"error": "Text contains only unsupported characters"}), 400
 
+    if _blocked_by_hung_inference():
+        return jsonify({"error": "TTS service is recovering from a prior timeout"}), 503
+
     try:
         with _model_lock:
+            if _blocked_by_hung_inference():
+                return jsonify({"error": "TTS service is recovering from a prior timeout"}), 503
             try:
                 audio = _generate_audio_timed(text)
             except InferenceTimeout as exc:
-                exc.thread.join()
+                global _hung_inference_thread
+                _hung_inference_thread = exc.thread
+                logger.error(
+                    "TTS inference timed out after %ss; blocking new requests until thread exits",
+                    _inference_timeout_seconds(),
+                )
                 return jsonify({"error": "TTS generation timed out"}), 504
     except RuntimeError as exc:
         if _load_error or _model_state is None:
