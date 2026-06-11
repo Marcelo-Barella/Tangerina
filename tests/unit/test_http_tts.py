@@ -7,7 +7,7 @@ from features.tts.http_tts import create_omnivoice_client
 
 
 @pytest.mark.unit
-class TestOmnivoiceTTS:
+class TestHttpTTS:
     def test_init_requires_api_url(self):
         with patch.dict(os.environ, {}, clear=True):
             with pytest.raises(RuntimeError, match="OMNIVOICE_API_URL"):

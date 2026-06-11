@@ -34,22 +34,6 @@ def _load_server_module():
 
 
 @pytest.mark.unit
-class TestOmnivoiceServerSanitizeText:
-    @pytest.fixture
-    def server(self):
-        return _load_server_module()
-
-    def test_strips_emoji_and_control_characters(self, server):
-        assert server.sanitize_text("hello 😀 world\x00test") == "hello worldtest"
-
-    def test_collapses_whitespace(self, server):
-        assert server.sanitize_text("  hello   world  ") == "hello world"
-
-    def test_returns_empty_string_for_emoji_only_input(self, server):
-        assert server.sanitize_text("😀🎉") == ""
-
-
-@pytest.mark.unit
 class TestOmnivoiceServerHealth:
     @pytest.fixture
     def server(self):

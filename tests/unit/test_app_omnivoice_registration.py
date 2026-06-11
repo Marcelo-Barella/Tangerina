@@ -7,6 +7,9 @@ import pytest
 
 
 def _install_app_stubs() -> None:
+    for name in _STUBBED_MODULES:
+        _stash_module(name)
+
     discord = MagicMock()
     discord.Intents = MagicMock()
     discord.Intents.default = MagicMock(return_value=MagicMock())
@@ -43,6 +46,27 @@ def _install_app_stubs() -> None:
     sys.modules["flask_routes"] = flask_routes_module
 
 
+_STUBBED_MODULES = (
+    "discord",
+    "discord.ext",
+    "discord.ext.commands",
+    "yt_dlp",
+    "dotenv",
+    "aiohttp",
+    "features.music.music_bot",
+    "features.music.music_service",
+    "features.tts.tts_handler",
+    "flask_routes",
+)
+
+_saved_modules: dict[str, object | None] = {}
+
+
+def _stash_module(name: str) -> None:
+    if name not in _saved_modules:
+        _saved_modules[name] = sys.modules.get(name)
+
+
 def _reload_app(env: dict[str, str]):
     for key in list(sys.modules):
         if key == "app" or key.startswith("app."):
@@ -50,6 +74,20 @@ def _reload_app(env: dict[str, str]):
     _install_app_stubs()
     with patch.dict("os.environ", env, clear=True):
         return importlib.import_module("app")
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_app_import_stubs():
+    yield
+    for key in list(sys.modules):
+        if key == "app" or key.startswith("app."):
+            del sys.modules[key]
+    for name, original in list(_saved_modules.items()):
+        if original is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = original
+        del _saved_modules[name]
 
 
 @pytest.mark.unit
