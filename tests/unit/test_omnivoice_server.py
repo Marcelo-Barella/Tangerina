@@ -2,7 +2,6 @@ import importlib.util
 import sys
 import threading
 from pathlib import Path
-from types import ModuleType
 from unittest.mock import MagicMock, patch
 
 import pytest

@@ -160,13 +160,12 @@ music_bot.chatbot = chatbot
 music_bot.tts_providers = tts_providers
 
 async def speak_tts(guild_id: int, channel_id: int, text: str, provider: Optional[str] = None) -> Dict[str, Any]:
-    async def resolve_channel(gid: int, cid: int) -> tuple[Optional[int], Optional[str]]:
-        return await _resolve_voice_channel(gid, cid, bot, music_bot)
     return await speak_tts_unified(
         guild_id, channel_id, text, provider or TTS_PROVIDER, tts_providers,
         tts_generate, set_eleven_api_key, ELEVEN_API_KEY,
         "iP95p4xoKVk53GoZ742B", "eleven_multilingual_v2", "mp3_44100_128",
-        music_bot, resolve_channel, music_bot.ytdl, YTDLSource
+        music_bot, lambda gid, cid: _resolve_voice_channel(gid, cid, bot, music_bot),
+        music_bot.ytdl, YTDLSource
     )
 
 music_bot.speak_tts_func = speak_tts

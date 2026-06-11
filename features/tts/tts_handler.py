@@ -1,6 +1,8 @@
 import asyncio
-import tempfile
 import logging
+import subprocess
+import tempfile
+import time
 from typing import Optional, Dict, Any
 import discord
 
@@ -23,9 +25,6 @@ class MixedAudioSource(discord.AudioSource):
     FRAME_SIZE = 3840
     
     def __init__(self, music_url: str, tts_file: str, music_volume: float = 0.2):
-        import subprocess
-        import time
-        
         self.music_url = music_url
         self.tts_file = tts_file
         self.music_volume = music_volume
@@ -80,7 +79,6 @@ class MixedAudioSource(discord.AudioSource):
     
     def cleanup(self):
         if self.process:
-            import subprocess
             try:
                 self.process.terminate()
                 self.process.wait(timeout=5)
