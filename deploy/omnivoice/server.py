@@ -174,16 +174,17 @@ def tts() -> Tuple[Response, int] | Response:
 
     try:
         with _model_lock:
-            audio = _generate_audio_timed(text)
-    except InferenceTimeout as exc:
-        join_timeout = _inference_timeout_seconds()
-        exc.thread.join(timeout=join_timeout)
-        if exc.thread.is_alive():
-            logger.error(
-                "Timed-out inference thread still running after %ss join wait",
-                join_timeout,
-            )
-        return jsonify({"error": "TTS generation timed out"}), 504
+            try:
+                audio = _generate_audio_timed(text)
+            except InferenceTimeout as exc:
+                join_timeout = _inference_timeout_seconds()
+                exc.thread.join(timeout=join_timeout)
+                if exc.thread.is_alive():
+                    logger.error(
+                        "Timed-out inference thread still running after %ss join wait",
+                        join_timeout,
+                    )
+                return jsonify({"error": "TTS generation timed out"}), 504
     except RuntimeError as exc:
         if _load_error or _model_state is None:
             return jsonify({"error": _load_error or "Model is not loaded yet"}), 503
