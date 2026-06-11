@@ -209,6 +209,99 @@ class TestOmnivoiceSpeakEndpoint:
         response = flask_client.post('/tts/omnivoice/speak', json={'guild_id': 123, 'channel_id': 456, 'text': ''})
         assert response.status_code == 400
 
+    def test_tts_piper_speak_missing_guild_id_returns_400(self, flask_client):
+        response = flask_client.post('/tts/piper/speak', json={'channel_id': 456, 'text': 'test'})
+        assert response.status_code == 400
+
+    def test_tts_piper_speak_passes_provider_to_speak_tts(
+        self, mock_bot, mock_music_bot, mock_music_service
+    ):
+        from flask_routes import create_flask_app
+
+        speak_tts = AsyncMock(return_value={'success': True})
+        app, set_loop = create_flask_app(
+            mock_bot,
+            mock_music_bot,
+            mock_music_service,
+            MagicMock(),
+            speak_tts,
+            True,
+        )
+        set_loop(asyncio.get_event_loop())
+        app.config['TESTING'] = True
+
+        with patch('flask_routes.asyncio.run_coroutine_threadsafe') as mock_run:
+            mock_future = MagicMock()
+            mock_future.result.return_value = {'success': True}
+            mock_run.return_value = mock_future
+
+            with app.test_client() as client:
+                response = client.post(
+                    '/tts/piper/speak',
+                    json={'guild_id': 123, 'channel_id': 456, 'text': 'test'},
+                )
+
+        assert response.status_code == 200
+        speak_tts.assert_called_once_with(123, 456, 'test', 'piper')
+
+    def test_tts_omnivoice_disabled_returns_503(
+        self, mock_bot, mock_music_bot, mock_music_service
+    ):
+        from flask_routes import create_flask_app
+
+        speak_tts = AsyncMock()
+        app, set_loop = create_flask_app(
+            mock_bot,
+            mock_music_bot,
+            mock_music_service,
+            MagicMock(),
+            speak_tts,
+            omnivoice_enabled=False,
+        )
+        set_loop(asyncio.get_event_loop())
+        app.config['TESTING'] = True
+
+        with app.test_client() as client:
+            response = client.post(
+                '/tts/omnivoice/speak',
+                json={'guild_id': 123, 'channel_id': 456, 'text': 'test'},
+            )
+
+        assert response.status_code == 503
+        speak_tts.assert_not_awaited()
+
+    def test_tts_speak_returns_500_when_handler_fails(
+        self, mock_bot, mock_music_bot, mock_music_service
+    ):
+        from flask_routes import create_flask_app
+
+        speak_tts = AsyncMock(return_value={'success': False, 'error': 'playback failed'})
+        app, set_loop = create_flask_app(
+            mock_bot,
+            mock_music_bot,
+            mock_music_service,
+            MagicMock(),
+            speak_tts,
+            True,
+        )
+        set_loop(asyncio.get_event_loop())
+        app.config['TESTING'] = True
+
+        with patch('flask_routes.asyncio.run_coroutine_threadsafe') as mock_run:
+            mock_future = MagicMock()
+            mock_future.result.return_value = {'success': False, 'error': 'playback failed'}
+            mock_run.return_value = mock_future
+
+            with app.test_client() as client:
+                response = client.post(
+                    '/tts/speak',
+                    json={'guild_id': 123, 'channel_id': 456, 'text': 'test'},
+                )
+
+        assert response.status_code == 500
+        data = json.loads(response.data)
+        assert data['success'] is False
+
     def test_tts_omnivoice_speak_timeout_returns_504(
         self, mock_bot, mock_music_bot, mock_music_service
     ):

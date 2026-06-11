@@ -1,4 +1,5 @@
 import importlib.util
+import os
 import sys
 import threading
 from pathlib import Path
@@ -94,6 +95,12 @@ class TestOmnivoiceServerTtsValidation:
         response = client.post("/tts", data="not json", content_type="application/json")
         assert response.status_code == 400
 
+    def test_tts_rejects_missing_text_field(self, server):
+        client = server.app.test_client()
+        response = client.post("/tts", json={"speed": 1.0})
+        assert response.status_code == 400
+        assert "text" in response.get_json()["error"]
+
     def test_tts_rejects_empty_text(self, server):
         client = server.app.test_client()
         response = client.post("/tts", json={"text": "   "})
@@ -112,6 +119,71 @@ class TestOmnivoiceServerTtsValidation:
         response = client.post("/tts", json={"text": "hello"})
         assert response.status_code == 200
         assert response.mimetype == "audio/wav"
+
+    def test_tts_success_removes_temp_wav_after_response(self, server):
+        captured_paths: list[str] = []
+
+        def capture_write(path, waveform, sample_rate):
+            captured_paths.append(path)
+            with open(path, "wb") as handle:
+                handle.write(b"RIFFWAVE")
+
+        server._generate_audio_timed = MagicMock(return_value=[b"\x00" * 16])
+        sys.modules["soundfile"].write = capture_write
+        client = server.app.test_client()
+        response = client.post("/tts", json={"text": "hello"})
+        response.get_data()
+
+        assert response.status_code == 200
+        assert captured_paths
+        assert not os.path.exists(captured_paths[0])
+
+    def test_tts_sf_write_failure_unlinks_temp(self, server):
+        captured_paths: list[str] = []
+
+        def failing_write(path, waveform, sample_rate):
+            captured_paths.append(path)
+            open(path, "wb").close()
+            raise OSError("disk full")
+
+        server._generate_audio_timed = MagicMock(return_value=[b"\x00" * 16])
+        sys.modules["soundfile"].write = failing_write
+        client = server.app.test_client()
+        response = client.post("/tts", json={"text": "hello"})
+
+        assert response.status_code == 500
+        assert captured_paths
+        assert not os.path.exists(captured_paths[0])
+
+    def test_tts_unblocks_after_hung_thread_exits(self, server):
+        hang_started = threading.Event()
+        hang_release = threading.Event()
+
+        def short_hang() -> None:
+            hang_started.set()
+            hang_release.wait(timeout=5)
+
+        hung_thread = threading.Thread(target=short_hang)
+        hung_thread.start()
+        assert hang_started.wait(timeout=1)
+
+        server._generate_audio_timed = MagicMock(
+            side_effect=[server.InferenceTimeout(hung_thread), [b"\x00" * 16]]
+        )
+        sys.modules["soundfile"].write = MagicMock()
+        client = server.app.test_client()
+
+        response = client.post("/tts", json={"text": "hello"})
+        assert response.status_code == 504
+
+        response2 = client.post("/tts", json={"text": "blocked"})
+        assert response2.status_code == 503
+
+        hang_release.set()
+        hung_thread.join(timeout=2)
+
+        response3 = client.post("/tts", json={"text": "recovered"})
+        assert response3.status_code == 200
 
     def test_tts_timeout_returns_504_without_blocking_on_hung_thread(self, server):
         hang_started = threading.Event()

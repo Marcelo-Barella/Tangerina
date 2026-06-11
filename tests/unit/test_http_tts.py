@@ -51,3 +51,47 @@ class TestHttpTTS:
             with patch("features.tts.http_tts.requests.post", return_value=mock_response):
                 with pytest.raises(RuntimeError, match="OmniVoice TTS API error"):
                     client.generate_speech("ola")
+
+    def test_generate_speech_cleans_up_on_write_error(self, tmp_path):
+        with patch.dict(os.environ, {"OMNIVOICE_API_URL": "http://localhost:5003"}):
+            client = create_omnivoice_client()
+            output_path = str(tmp_path / "out.wav")
+
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.iter_content.return_value = [b"RIFF"]
+
+            with patch("features.tts.http_tts.requests.post", return_value=mock_response), \
+                 patch("builtins.open", side_effect=OSError("write failed")):
+                with pytest.raises(OSError, match="write failed"):
+                    client.generate_speech("ola", output_path=output_path)
+
+            assert not os.path.exists(output_path)
+
+    def test_generate_speech_rejects_empty_response_body(self, tmp_path):
+        with patch.dict(os.environ, {"OMNIVOICE_API_URL": "http://localhost:5003"}):
+            client = create_omnivoice_client()
+            output_path = str(tmp_path / "out.wav")
+
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.iter_content.return_value = []
+
+            with patch("features.tts.http_tts.requests.post", return_value=mock_response):
+                with pytest.raises(RuntimeError, match="empty or invalid audio"):
+                    client.generate_speech("ola", output_path=output_path)
+
+            assert not os.path.exists(output_path)
+
+    def test_generate_speech_raises_on_timeout(self):
+        import requests
+
+        with patch.dict(os.environ, {"OMNIVOICE_API_URL": "http://localhost:5003"}):
+            client = create_omnivoice_client()
+
+            with patch(
+                "features.tts.http_tts.requests.post",
+                side_effect=requests.exceptions.Timeout(),
+            ):
+                with pytest.raises(RuntimeError, match="timed out"):
+                    client.generate_speech("ola")
