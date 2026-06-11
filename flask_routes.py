@@ -48,7 +48,7 @@ def create_flask_app(
         future = asyncio.run_coroutine_threadsafe(coro, bot_loop)
         return future.result(timeout=timeout)
 
-    def _run_tts_speak(timeout, timeout_error=None, provider=None):
+    def _run_tts_speak(timeout, *, timeout_error=None, provider=None):
         request_data = request.get_json() or {}
         guild_id, channel_id = parse_guild_channel_ids(request_data)
         if guild_id is None or channel_id is None:
@@ -258,7 +258,7 @@ def create_flask_app(
         omnivoice_timeout = int(os.getenv('OMNIVOICE_TIMEOUT', '90'))
         return _run_tts_speak(
             omnivoice_timeout + 30,
-            'OmniVoice TTS request timed out',
+            timeout_error='OmniVoice TTS request timed out',
             provider='omnivoice',
         )
 

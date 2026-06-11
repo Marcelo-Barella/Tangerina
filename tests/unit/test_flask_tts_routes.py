@@ -103,3 +103,37 @@ class TestFlaskTtsRoutes:
         )
         assert response.status_code == 503
         assert "not configured" in response.get_json()["error"]
+
+    def test_omnivoice_speak_passes_provider_to_handler(self):
+        speak_tts = AsyncMock(return_value={"success": True})
+        app = _create_test_app(speak_tts)
+
+        with patch("flask_routes.asyncio.run_coroutine_threadsafe") as mock_run:
+            mock_future = MagicMock()
+            mock_future.result.return_value = {"success": True}
+            mock_run.return_value = mock_future
+
+            response = app.test_client().post(
+                "/tts/omnivoice/speak",
+                json={"guild_id": 123, "channel_id": 456, "text": "hello"},
+            )
+
+        assert response.status_code == 200
+        speak_tts.assert_called_once_with(123, 456, "hello", "omnivoice")
+
+    def test_omnivoice_speak_timeout_returns_504(self):
+        app = _create_test_app(AsyncMock())
+
+        with patch("flask_routes.asyncio.run_coroutine_threadsafe") as mock_run:
+            mock_future = MagicMock()
+            mock_future.result.side_effect = TimeoutError()
+            mock_run.return_value = mock_future
+
+            response = app.test_client().post(
+                "/tts/omnivoice/speak",
+                json={"guild_id": 123, "channel_id": 456, "text": "hello"},
+            )
+
+        assert response.status_code == 504
+        data = json.loads(response.data)
+        assert data["error"] == "OmniVoice TTS request timed out"
