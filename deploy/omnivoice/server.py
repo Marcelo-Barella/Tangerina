@@ -10,7 +10,7 @@ import torch
 from flask import Flask, Response, after_this_request, jsonify, request, send_file
 
 from model_loader import load_omnivoice_model
-from sanitize_text import sanitize_text
+from sanitize_text import sanitize_text, unlink_temp
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
@@ -68,13 +68,6 @@ def _get_model_state() -> Dict[str, Any]:
 
 def _inference_timeout_seconds() -> int:
     return int(os.getenv("OMNIVOICE_TIMEOUT", "90"))
-
-
-def _unlink(path: str) -> None:
-    try:
-        os.remove(path)
-    except OSError:
-        pass
 
 
 def _blocked_by_hung_inference() -> bool:
@@ -201,12 +194,12 @@ def tts() -> Tuple[Response, int] | Response:
     try:
         sf.write(output_path, waveform, 24000)
     except Exception as exc:
-        _unlink(output_path)
+        unlink_temp(output_path)
         return jsonify({"error": str(exc)}), 500
 
     @after_this_request
     def _remove_temp_file(response):
-        _unlink(output_path)
+        unlink_temp(output_path)
         return response
 
     return send_file(

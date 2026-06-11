@@ -1,3 +1,4 @@
+import os
 import re
 
 _EMOJI_PATTERN = re.compile(
@@ -23,3 +24,10 @@ def sanitize_text(text: str) -> str:
     text = re.sub(r"[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]", "", text)
     text = re.sub(r"\s+", " ", text)
     return text.strip()
+
+
+def unlink_temp(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass

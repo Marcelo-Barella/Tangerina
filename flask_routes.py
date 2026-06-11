@@ -59,11 +59,10 @@ def create_flask_app(
             return jsonify({'error': 'text is required'}), 400
 
         try:
-            if provider:
-                coro = speak_tts_func(guild_id, channel_id, text, provider)
-            else:
-                coro = speak_tts_func(guild_id, channel_id, text)
-            tts_response = run_async(coro, timeout=timeout)
+            tts_response = run_async(
+                speak_tts_func(guild_id, channel_id, text, provider),
+                timeout=timeout,
+            )
         except TimeoutError:
             return jsonify({
                 'success': False,
