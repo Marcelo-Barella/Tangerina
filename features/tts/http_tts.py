@@ -86,8 +86,7 @@ def ensure_output_path(output_path: Optional[str]) -> str:
 
 def cleanup_tts_file(path: str) -> None:
     try:
-        if os.path.exists(path):
-            os.remove(path)
+        os.remove(path)
     except OSError:
         pass
 
