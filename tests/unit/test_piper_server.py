@@ -1,49 +1,17 @@
-import importlib.util
 import os
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-SERVER_PATH = Path(__file__).resolve().parents[2] / "deploy" / "piper" / "server.py"
-SERVER_MODULE = "piper_server_under_test"
-
-
-def _install_server_stubs() -> None:
-    deploy_dir = str(SERVER_PATH.parents[1])
-    if deploy_dir not in sys.path:
-        sys.path.insert(0, deploy_dir)
-    if isinstance(sys.modules.get("flask"), MagicMock):
-        del sys.modules["flask"]
-
-
-def _load_server_module():
-    _install_server_stubs()
-    sys.modules.pop(SERVER_MODULE, None)
-    spec = importlib.util.spec_from_file_location(SERVER_MODULE, SERVER_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    sys.modules[SERVER_MODULE] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-def _fake_named_tempfile(created_paths: list[str], tmp_path, **_kwargs):
-    handle = MagicMock()
-    path = str(tmp_path / f"temp-{len(created_paths)}.wav")
-    created_paths.append(path)
-    handle.name = path
-    handle.__enter__ = MagicMock(return_value=handle)
-    handle.__exit__ = MagicMock(return_value=False)
-    return handle
+from tests.unit.sidecar_server_test_utils import fake_named_tempfile, load_sidecar_server
 
 
 @pytest.mark.unit
 class TestPiperServerTts:
     @pytest.fixture
     def server(self, tmp_path):
-        module = _load_server_module()
+        module = load_sidecar_server("piper/server.py", "piper_server_under_test")
         model_path = tmp_path / "model.onnx"
         model_path.write_bytes(b"onnx")
         module.PIPER_MODEL_PATH = str(model_path)
@@ -61,7 +29,7 @@ class TestPiperServerTts:
         with patch.object(
             server.tempfile,
             "NamedTemporaryFile",
-            side_effect=lambda **kwargs: _fake_named_tempfile(created_paths, tmp_path, **kwargs),
+            side_effect=lambda **kwargs: fake_named_tempfile(created_paths, tmp_path, **kwargs),
         ):
             with patch.object(server.subprocess, "run", side_effect=create_output_on_run) as mock_run:
                 client = server.app.test_client()
@@ -80,7 +48,7 @@ class TestPiperServerTts:
         with patch.object(
             server.tempfile,
             "NamedTemporaryFile",
-            side_effect=lambda **kwargs: _fake_named_tempfile(created_paths, tmp_path, **kwargs),
+            side_effect=lambda **kwargs: fake_named_tempfile(created_paths, tmp_path, **kwargs),
         ):
             with patch.object(server.subprocess, "run", return_value=mock_process):
                 client = server.app.test_client()
@@ -96,7 +64,7 @@ class TestPiperServerTts:
         with patch.object(
             server.tempfile,
             "NamedTemporaryFile",
-            side_effect=lambda **kwargs: _fake_named_tempfile(created_paths, tmp_path, **kwargs),
+            side_effect=lambda **kwargs: fake_named_tempfile(created_paths, tmp_path, **kwargs),
         ):
             with patch.object(
                 server.subprocess,

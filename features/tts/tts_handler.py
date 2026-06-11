@@ -6,7 +6,7 @@ import time
 from typing import Optional, Dict, Any
 import discord
 
-from features.tts.http_tts import cleanup_tts_file
+from features.tts.http_tts import unlink_temp
 
 logger = logging.getLogger(__name__)
 
@@ -249,13 +249,13 @@ async def speak_tts_unified(
     resolved_channel_id, error = await _resolve_voice_channel(guild_id, channel_id)
     if error:
         if http_provider:
-            cleanup_tts_file(audio_file)
+            unlink_temp(audio_file)
         return {'success': False, 'error': error}
     
     voice_client = await music_bot.join_voice_channel(guild_id, resolved_channel_id)
     if not voice_client:
         if http_provider:
-            cleanup_tts_file(audio_file)
+            unlink_temp(audio_file)
         return {'success': False, 'error': 'Failed to join voice channel'}
 
     music_source_info = music_bot.get_current_music_source(guild_id)
@@ -271,14 +271,14 @@ async def speak_tts_unified(
     try:
         loop = music_bot.main_loop or asyncio.get_running_loop()
 
-        async def cleanup_tts():
+        async def remove_audio_after_delay():
             await asyncio.sleep(cleanup_delay)
-            cleanup_tts_file(audio_file)
+            unlink_temp(audio_file)
             if was_playing:
                 _restore_music_volume(guild_id, original_volume, music_bot)
 
         def after_play(error):
-            loop.call_soon_threadsafe(asyncio.create_task, cleanup_tts())
+            loop.call_soon_threadsafe(asyncio.create_task, remove_audio_after_delay())
 
         if use_mixing and music_source_info:
             current_song = music_bot.current_songs.get(guild_id)

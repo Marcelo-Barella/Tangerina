@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from features.tts.http_tts import cleanup_tts_file, create_omnivoice_client
+from features.tts.http_tts import create_omnivoice_client
 
 
 @pytest.mark.unit
@@ -52,15 +52,6 @@ class TestHttpTTS:
             with patch("features.tts.http_tts.requests.post", return_value=mock_response):
                 with pytest.raises(RuntimeError, match="OmniVoice TTS API error"):
                     client.generate_speech("ola")
-
-    def test_cleanup_tts_file_removes_existing_file(self, tmp_path):
-        audio_file = tmp_path / "stale.wav"
-        audio_file.write_bytes(b"RIFF")
-        cleanup_tts_file(str(audio_file))
-        assert not audio_file.exists()
-
-    def test_cleanup_tts_file_ignores_missing_file(self, tmp_path):
-        cleanup_tts_file(str(tmp_path / "missing.wav"))
 
     def test_generate_speech_rejects_empty_streamed_response(self, tmp_path):
         with patch.dict(os.environ, {"OMNIVOICE_API_URL": "http://localhost:5003"}):

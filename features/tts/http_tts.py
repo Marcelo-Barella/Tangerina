@@ -1,11 +1,18 @@
 import os
+import sys
 import tempfile
+from pathlib import Path
 from typing import Optional
 
 try:
     import requests
 except ImportError:
     requests = None
+
+_deploy_dir = Path(__file__).resolve().parents[2] / "deploy"
+if str(_deploy_dir) not in sys.path:
+    sys.path.insert(0, str(_deploy_dir))
+from sanitize_text import unlink_temp
 
 
 class HttpTTSClient:
@@ -58,7 +65,7 @@ class HttpTTSClient:
         except requests.exceptions.RequestException as exc:
             raise RuntimeError(f"{self.provider_name} TTS API request failed: {exc}")
         except Exception:
-            cleanup_tts_file(output_path)
+            unlink_temp(output_path)
             raise
 
 
@@ -83,11 +90,4 @@ def ensure_output_path(output_path: Optional[str]) -> str:
     temp_file.close()
     return path
 
-
-def cleanup_tts_file(path: str) -> None:
-    try:
-        if os.path.exists(path):
-            os.remove(path)
-    except OSError:
-        pass
 
