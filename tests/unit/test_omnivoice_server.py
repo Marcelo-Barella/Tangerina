@@ -99,6 +99,19 @@ class TestOmnivoiceServerTtsValidation:
         response = client.post("/tts", json={"text": "   "})
         assert response.status_code == 400
 
+    def test_tts_rejects_missing_text_field(self, server):
+        client = server.app.test_client()
+        response = client.post("/tts", json={"message": "hello"})
+        assert response.status_code == 400
+        assert "Missing 'text' field" in response.get_json()["error"]
+
+    def test_tts_returns_503_when_model_not_ready(self, server):
+        server._model_ready = False
+        server._model_state = None
+        client = server.app.test_client()
+        response = client.post("/tts", json={"text": "hello"})
+        assert response.status_code == 503
+
     def test_tts_rejects_emoji_only_text_after_sanitization(self, server):
         client = server.app.test_client()
         response = client.post("/tts", json={"text": "😀🎉"})

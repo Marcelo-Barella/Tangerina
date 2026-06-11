@@ -241,6 +241,69 @@ class TestOmnivoiceSpeakEndpoint:
         data = json.loads(response.data)
         assert 'timed out' in data['error'].lower()
 
+    def test_tts_omnivoice_speak_disabled_returns_503(
+        self, mock_bot, mock_music_bot, mock_music_service
+    ):
+        from flask_routes import create_flask_app
+
+        speak_tts = AsyncMock()
+        app, set_loop = create_flask_app(
+            mock_bot,
+            mock_music_bot,
+            mock_music_service,
+            MagicMock(),
+            speak_tts,
+            False,
+        )
+        set_loop(asyncio.get_event_loop())
+        app.config['TESTING'] = True
+
+        with app.test_client() as client:
+            response = client.post(
+                '/tts/omnivoice/speak',
+                json={'guild_id': 123, 'channel_id': 456, 'text': 'test'},
+            )
+
+        assert response.status_code == 503
+        assert 'not configured' in json.loads(response.data)['error'].lower()
+
+@pytest.mark.integration
+class TestPiperSpeakEndpoint:
+    def test_tts_piper_speak_missing_text_returns_400(self, flask_client):
+        response = flask_client.post('/tts/piper/speak', json={'guild_id': 123, 'channel_id': 456})
+        assert response.status_code == 400
+
+    def test_tts_piper_speak_passes_provider_to_handler(
+        self, mock_bot, mock_music_bot, mock_music_service
+    ):
+        from flask_routes import create_flask_app
+
+        speak_tts = AsyncMock(return_value={'success': True, 'message': 'ok'})
+        app, set_loop = create_flask_app(
+            mock_bot,
+            mock_music_bot,
+            mock_music_service,
+            MagicMock(),
+            speak_tts,
+            True,
+        )
+        set_loop(asyncio.get_event_loop())
+        app.config['TESTING'] = True
+
+        with patch('flask_routes.asyncio.run_coroutine_threadsafe') as mock_run:
+            mock_future = MagicMock()
+            mock_future.result.return_value = {'success': True}
+            mock_run.return_value = mock_future
+
+            with app.test_client() as client:
+                response = client.post(
+                    '/tts/piper/speak',
+                    json={'guild_id': 123, 'channel_id': 456, 'text': 'hi'},
+                )
+
+        assert response.status_code == 200
+        speak_tts.assert_called_once_with(123, 456, 'hi', 'piper')
+
 @pytest.mark.integration
 class TestErrorHandling:
     def test_invalid_json_body_returns_400(self, flask_client):
