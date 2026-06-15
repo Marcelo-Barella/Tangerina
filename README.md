@@ -335,7 +335,7 @@ As respostas do chatbot não são enviadas automaticamente via Discord através 
 - `SPOTIFY_CLIENT_SECRET` - Client Secret do Spotify Developer App
 - `TTS_PROVIDER` - Provedor TTS: 'elevenlabs', 'piper' ou 'omnivoice' (padrão: elevenlabs)
 - `ELEVEN_API_KEY` - Chave da API ElevenLabs para TTS
-- `WHISPER_PROVIDER` - Provedor de transcrição de voz: 'zhipu' (GLM-ASR-2512) ou 'openai' (Whisper local) (padrão: zhipu)
+- `WHISPER_PROVIDER` - Provedor de transcrição: `zhipu`, `openai`, `openai-api`, `sidecar` (padrão: `openai-api` se `OPENAI_API_KEY` definida, senão `sidecar`)
 
 **Variáveis de Memória (ChromaDB):**
 - `MEMORY_ENABLED` - Habilita memória de longo prazo (padrão: false)
@@ -867,7 +867,7 @@ Todos os comandos de música funcionam por voz:
 
 #### Variáveis de Ambiente
 
-- `WHISPER_PROVIDER` (opcional) - Provedor de transcrição: 'zhipu' (GLM-ASR-2512) ou 'openai' (Whisper local) (padrão: zhipu)
+- `WHISPER_PROVIDER` (opcional) - Provedor de transcrição: `zhipu`, `openai`, `openai-api`, `sidecar` (padrão: `openai-api` se `OPENAI_API_KEY` definida, senão `sidecar`)
 - `ZHIPU_API_KEY` (opcional) - Chave da API ZhipuAI GLM para chatbot e transcrição (necessário se WHISPER_PROVIDER=zhipu)
 - `TTS_PROVIDER` (opcional) - Provedor TTS: 'elevenlabs', 'piper' ou 'omnivoice' (padrão: elevenlabs)
 - `ELEVEN_API_KEY` (opcional) - Chave da API ElevenLabs para TTS

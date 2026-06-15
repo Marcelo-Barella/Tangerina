@@ -118,7 +118,7 @@ if os.getenv('WEB_SEARCH_ENABLED', 'true').lower() == 'true' and (TAVILY_API_KEY
 
 MODEL_PROVIDER = os.getenv('MODEL_PROVIDER', 'zhipu')
 provider_map = {
-    'openai': (OpenAIChatbot, os.getenv('OPENAI_API_KEY')),
+    'openai': (OpenAIChatbot, _openai_api_key or None),
     'gemini': (GeminiChatbot, os.getenv('GEMINI_API_KEY')),
     'zhipu': (ZhipuChatbot, os.getenv('ZHIPU_API_KEY'))
 }
