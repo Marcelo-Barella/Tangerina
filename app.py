@@ -65,6 +65,22 @@ load_dotenv()
 logging.basicConfig(level=os.getenv('LOG_LEVEL', 'INFO'), format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+def _openai_api_key_from_env() -> Optional[str]:
+    key = os.getenv('OPENAI_API_KEY')
+    if key is None or not key.strip():
+        return None
+    return key.strip()
+
+
+def _whisper_provider_from_env(openai_api_key: Optional[str]) -> str:
+    configured = os.getenv('WHISPER_PROVIDER')
+    if configured is not None and configured.strip():
+        return configured.strip()
+    if openai_api_key:
+        return 'openai-api'
+    return 'sidecar'
+
+
 DISCORD_BOT_TOKEN = os.getenv('DISCORD_BOT_TOKEN')
 if not DISCORD_BOT_TOKEN:
     raise ValueError('DISCORD_BOT_TOKEN environment variable is required')
@@ -81,8 +97,9 @@ bot_loop: Optional[asyncio.AbstractEventLoop] = None
 
 music_bot = MusicBot(bot)
 music_bot.zhipu_api_key = os.getenv('ZHIPU_API_KEY')
-music_bot.whisper_provider = os.getenv('WHISPER_PROVIDER', 'sidecar')
-music_bot.openai_api_key = os.getenv('OPENAI_API_KEY')
+_openai_api_key = _openai_api_key_from_env()
+music_bot.whisper_provider = _whisper_provider_from_env(_openai_api_key)
+music_bot.openai_api_key = _openai_api_key
 
 spotify_client = None
 if SpotifyIntegration and (SPOTIFY_CLIENT_ID := os.getenv('SPOTIFY_CLIENT_ID')) and (SPOTIFY_CLIENT_SECRET := os.getenv('SPOTIFY_CLIENT_SECRET')):
