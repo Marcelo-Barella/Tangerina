@@ -1,8 +1,6 @@
 import logging
 from typing import Any, Callable, Optional
 
-import discord
-
 logger = logging.getLogger(__name__)
 
 DISCORD_MESSAGE_LIMIT = 2000
@@ -105,9 +103,6 @@ async def post_chatbot_reply(
     for chunk in split_discord_message(text):
         try:
             await channel.send(chunk)
-        except discord.HTTPException as e:
-            logger.error(f"Discord HTTP error sending chatbot reply: {e}")
-            return
         except Exception as e:
             logger.error(f"Error sending chatbot reply: {e}")
             return
