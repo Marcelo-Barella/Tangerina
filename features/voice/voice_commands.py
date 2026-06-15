@@ -15,7 +15,7 @@ import discord
 logger = logging.getLogger(__name__)
 
 MIN_AUDIO_CHUNKS = 10
-MIN_PCM_BYTES = 61440
+MIN_PCM_BYTES = MIN_AUDIO_CHUNKS * 3840
 MIN_SPEECH_RMS = 300
 QUEUE_DISPLAY_LIMIT = 5
 VOLUME_MIN = 0
