@@ -59,6 +59,24 @@ def should_respond_with_chatbot(message: Any, bot_user: Any = None) -> bool:
     )
 
 
+def _successful_send_mensagem_texts(
+    tool_calls: Optional[list[dict[str, Any]]],
+) -> list[str]:
+    sent: list[str] = []
+    for tc in tool_calls or []:
+        if tc.get("tool") != "SEND_Mensagem":
+            continue
+        if tc.get("result", {}).get("success") is not True:
+            continue
+        text = tc.get("parameters", {}).get("text")
+        if not isinstance(text, str):
+            continue
+        normalized = text.strip()
+        if normalized:
+            sent.append(normalized)
+    return sent
+
+
 def should_post_chatbot_reply(
     response: Any,
     tool_calls: Optional[list[dict[str, Any]]],
@@ -70,9 +88,11 @@ def should_post_chatbot_reply(
         return False
     if normalized in _SUPPRESSED_RESPONSES:
         return False
-    for tc in tool_calls or []:
-        if tc.get("tool") == "SEND_Mensagem" and tc.get("result", {}).get("success") is True:
-            return False
+    sent_texts = _successful_send_mensagem_texts(tool_calls)
+    if sent_texts and normalized in sent_texts:
+        return False
+    if sent_texts and normalized == " ".join(sent_texts):
+        return False
     return True
 
 
