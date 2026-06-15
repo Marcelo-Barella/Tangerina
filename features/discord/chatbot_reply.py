@@ -63,21 +63,11 @@ def should_respond_with_chatbot(message: Any, bot_user: Any = None) -> bool:
     )
 
 
-def should_post_chatbot_reply(
-    response: Any,
+def _successful_send_mensagem_texts(
     tool_calls: Optional[list[dict[str, Any]]],
     channel_id: Optional[int] = None,
-) -> Optional[str]:
-    if not isinstance(response, str):
-        return None
-    normalized = response.strip()
-    if not normalized:
-        return None
-    if normalized in _SUPPRESSED_RESPONSES:
-        return None
-    if any(normalized.startswith(prefix) for prefix in _SUPPRESSED_PREFIXES):
-        return None
-    sent_texts: list[str] = []
+) -> list[str]:
+    sent: list[str] = []
     for tc in tool_calls or []:
         if tc.get("tool") != "SEND_Mensagem":
             continue
@@ -94,9 +84,27 @@ def should_post_chatbot_reply(
         text = params.get("text")
         if not isinstance(text, str):
             continue
-        stripped = text.strip()
-        if stripped:
-            sent_texts.append(stripped)
+        normalized = text.strip()
+        if normalized:
+            sent.append(normalized)
+    return sent
+
+
+def should_post_chatbot_reply(
+    response: Any,
+    tool_calls: Optional[list[dict[str, Any]]],
+    channel_id: Optional[int] = None,
+) -> Optional[str]:
+    if not isinstance(response, str):
+        return None
+    normalized = response.strip()
+    if not normalized:
+        return None
+    if normalized in _SUPPRESSED_RESPONSES:
+        return None
+    if any(normalized.startswith(prefix) for prefix in _SUPPRESSED_PREFIXES):
+        return None
+    sent_texts = _successful_send_mensagem_texts(tool_calls, channel_id)
     if sent_texts:
         if normalized in sent_texts:
             return None
