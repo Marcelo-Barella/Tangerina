@@ -325,11 +325,13 @@ def normalize_context(context: Optional[List[Dict]]) -> List[Dict]:
 
 
 def load_tangerina_persona() -> str:
+    persona_path = Path(__file__).parent / "tangerina_persona.txt"
+    if not persona_path.is_file():
+        return DEFAULT_PERSONA_FALLBACK
     try:
-        persona_path = Path(__file__).parent / "tangerina_persona.txt"
         with open(persona_path, "r", encoding="utf-8") as f:
             return f.read()
-    except FileNotFoundError:
+    except OSError:
         return DEFAULT_PERSONA_FALLBACK
 
 
