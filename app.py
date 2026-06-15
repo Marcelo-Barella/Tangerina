@@ -81,8 +81,9 @@ bot_loop: Optional[asyncio.AbstractEventLoop] = None
 
 music_bot = MusicBot(bot)
 music_bot.zhipu_api_key = os.getenv('ZHIPU_API_KEY')
-music_bot.whisper_provider = os.getenv('WHISPER_PROVIDER', 'sidecar')
-music_bot.openai_api_key = os.getenv('OPENAI_API_KEY')
+_openai_api_key = os.getenv('OPENAI_API_KEY')
+music_bot.openai_api_key = _openai_api_key.strip() if _openai_api_key and _openai_api_key.strip() else None
+music_bot.whisper_provider = os.getenv('WHISPER_PROVIDER') or ('openai-api' if music_bot.openai_api_key else 'sidecar')
 
 spotify_client = None
 if SpotifyIntegration and (SPOTIFY_CLIENT_ID := os.getenv('SPOTIFY_CLIENT_ID')) and (SPOTIFY_CLIENT_SECRET := os.getenv('SPOTIFY_CLIENT_SECRET')):
