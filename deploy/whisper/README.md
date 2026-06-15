@@ -1,13 +1,13 @@
-## Whisper ASR sidecar (OpenAI Whisper, pt)
+## Whisper ASR sidecar
 
-This service runs **OpenAI Whisper locally** as a small HTTP API, similar to the existing Piper TTS sidecar.
+HTTP transcription service used when `WHISPER_PROVIDER=sidecar`. Prefers the **OpenAI Whisper API** (`whisper-1`) when `OPENAI_API_KEY` is set; otherwise falls back to local `openai-whisper`.
 
 ### Defaults
 
-- **Model**: `base`
+- **Provider**: OpenAI API when `OPENAI_API_KEY` is set, else local `openai-whisper`
 - **Language**: `pt`
 - **Port**: `5002`
-- **Model cache**: `deploy/whisper/cache` (persisted via volume mount)
+- **Local model cache**: `deploy/whisper/cache` (local fallback only)
 
 ### Prerequisite: docker network
 
@@ -27,6 +27,8 @@ From `deploy/whisper/`:
 docker compose up --build -d
 ```
 
+Set `OPENAI_API_KEY` in the repo root `.env` (loaded via `env_file`).
+
 ### Healthcheck
 
 ```bash
@@ -41,16 +43,18 @@ curl -sS \
   http://localhost:5002/transcribe
 ```
 
+### Bot without sidecar
+
+If `OPENAI_API_KEY` is set and `WHISPER_PROVIDER` is empty, the bot uses `openai-api` directly (no sidecar container required).
+
 ### Configuration
 
-Set env vars when starting compose:
+```bash
+WHISPER_LANGUAGE=pt docker compose up --build -d
+```
+
+For local fallback only:
 
 ```bash
 WHISPER_MODEL=base WHISPER_LANGUAGE=pt docker compose up --build -d
 ```
-
-### Notes
-
-- The first transcription triggers Whisper to **download model weights** into the cache directory. Subsequent runs reuse the cached weights.
-
-

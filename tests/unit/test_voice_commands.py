@@ -8,9 +8,19 @@ from features.voice.voice_commands import (
     VOLUME_MIN,
     VOLUME_MAX,
     LISTENING_DURATION,
-    VoiceCommandSink
+    WHISPER_INITIAL_PROMPT,
+    VoiceCommandSink,
 )
 from tests.conftest import TEST_GUILD_ID
+
+SPEECH_PCM_CHUNK = b'\xff\x7f' * 1920
+
+
+def _fill_speech_buffer(sink, user_id, chunk_count=20):
+    from collections import deque
+    sink.audio_buffers[user_id] = deque(maxlen=150)
+    for _ in range(chunk_count):
+        sink.audio_buffers[user_id].append(SPEECH_PCM_CHUNK)
 
 @pytest.mark.unit
 class TestVoiceCommandConstants:
@@ -100,9 +110,67 @@ class TestVoiceCommandSinkAudioProcessing:
         mock_user.id = 999
         mock_audio_data = MagicMock()
         mock_audio_data.pcm = None
+        mock_audio_data.opus = None
         
         sink.write(mock_user, mock_audio_data)
         assert mock_user.id not in sink.audio_buffers
+
+    def test_wants_opus_returns_false(self, sink_instance):
+        sink, _, _, _ = sink_instance
+        assert sink.wants_opus() is False
+
+    def test_write_buffers_voice_recv_pcm(self, sink_instance):
+        sink, _, _, _ = sink_instance
+        mock_user = MagicMock(spec=discord.Member)
+        mock_user.id = 999
+        mock_audio_data = MagicMock()
+        mock_audio_data.pcm = b'pcm-bytes'
+        mock_audio_data.opus = b'opus-frame'
+
+        sink.write(mock_user, mock_audio_data)
+
+        assert len(sink.audio_buffers[999]) == 1
+
+    def test_write_skips_failed_voice_recv_pcm(self, sink_instance):
+        sink, _, _, _ = sink_instance
+        mock_user = MagicMock(spec=discord.Member)
+        mock_user.id = 999
+        mock_audio_data = MagicMock()
+        mock_audio_data.pcm = b''
+        mock_audio_data.opus = b'opus-frame'
+
+        sink.write(mock_user, mock_audio_data)
+
+        assert mock_user.id not in sink.audio_buffers
+
+    def test_write_skips_opus_silence_packet(self, sink_instance):
+        sink, _, _, _ = sink_instance
+        mock_user = MagicMock(spec=discord.Member)
+        mock_user.id = 999
+        mock_audio_data = MagicMock()
+        mock_audio_data.pcm = b'pcm-bytes'
+        mock_audio_data.packet = MagicMock()
+        mock_audio_data.packet.decrypted_data = b'\xf8\xff\xfe'
+
+        sink.write(mock_user, mock_audio_data)
+
+        assert mock_user.id not in sink.audio_buffers
+
+    def test_write_ignores_empty_pcm(self, sink_instance):
+        sink, _, _, _ = sink_instance
+        mock_user = MagicMock(spec=discord.Member)
+        mock_user.id = 999
+        mock_audio_data = MagicMock()
+        mock_audio_data.pcm = b''
+        mock_audio_data.opus = None
+
+        sink.write(mock_user, mock_audio_data)
+        assert mock_user.id not in sink.audio_buffers
+
+    def test_has_speech_energy_rejects_quiet_audio(self, sink_instance):
+        sink, _, _, _ = sink_instance
+        assert sink._has_speech_energy(b'\x00\x00' * 100) is False
+        assert sink._has_speech_energy(SPEECH_PCM_CHUNK) is True
 
 
 @pytest.mark.unit
@@ -247,6 +315,21 @@ class TestVoiceCommandSinkTranscription:
         sink.audio_buffers[999].append(b'chunk1')
         await sink.process_speech(mock_member)
         
+        sink._transcribe_audio.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_process_speech_skips_insufficient_pcm_bytes(self, sink_instance):
+        sink, _, _, _ = sink_instance
+        sink._transcribe_audio = AsyncMock()
+
+        mock_member = MagicMock(spec=discord.Member)
+        mock_member.id = 999
+
+        from collections import deque
+        sink.audio_buffers[999] = deque([b'x' * 100] * 15, maxlen=150)
+
+        await sink.process_speech(mock_member)
+
         sink._transcribe_audio.assert_not_called()
 
     @pytest.mark.asyncio
@@ -486,6 +569,107 @@ class TestVoiceCommandSinkTranscriptionProviders:
         sink._transcribe_zhipu.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_transcribe_audio_routes_to_openai_api(self):
+        mock_bot = MagicMock()
+        mock_vc = MagicMock()
+        mock_music_service = MagicMock()
+
+        sink = VoiceCommandSink(
+            bot_instance=mock_bot,
+            voice_client=mock_vc,
+            guild_id=TEST_GUILD_ID,
+            zhipu_api_key=None,
+            whisper_provider='openai-api',
+            music_service=mock_music_service,
+            openai_api_key='test_openai_key',
+        )
+
+        sink._transcribe_openai_api = AsyncMock(return_value="toca música")
+
+        import io
+        audio_data = io.BytesIO(b'test')
+        result = await sink._transcribe_audio(audio_data)
+
+        assert result == "toca música"
+        sink._transcribe_openai_api.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_transcribe_openai_api_returns_trimmed_text(self):
+        mock_bot = MagicMock()
+        mock_vc = MagicMock()
+        mock_music_service = MagicMock()
+
+        sink = VoiceCommandSink(
+            bot_instance=mock_bot,
+            voice_client=mock_vc,
+            guild_id=TEST_GUILD_ID,
+            zhipu_api_key=None,
+            whisper_provider='openai-api',
+            music_service=mock_music_service,
+            openai_api_key='test_openai_key',
+        )
+
+        import io
+        audio_data = io.BytesIO(b'RIFF')
+
+        with patch('features.voice.voice_commands.build_openai_whisper_client', return_value=MagicMock()):
+            with patch(
+                'features.voice.voice_commands.transcribe_openai_whisper',
+                return_value='toca música',
+            ):
+                result = await sink._transcribe_openai_api(audio_data)
+
+        assert result == 'toca música'
+
+    @pytest.mark.asyncio
+    async def test_transcribe_openai_api_returns_none_without_key(self):
+        mock_bot = MagicMock()
+        mock_vc = MagicMock()
+        mock_music_service = MagicMock()
+
+        sink = VoiceCommandSink(
+            bot_instance=mock_bot,
+            voice_client=mock_vc,
+            guild_id=TEST_GUILD_ID,
+            zhipu_api_key=None,
+            whisper_provider='openai-api',
+            music_service=mock_music_service,
+            openai_api_key=None,
+        )
+
+        import io
+        result = await sink._transcribe_openai_api(io.BytesIO(b'RIFF'))
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_transcribe_sidecar_sends_initial_prompt(self, sink_instance):
+        sink, _, _, _ = sink_instance
+        captured = {}
+
+        class FakeFormData:
+            def add_field(self, name, value, **kwargs):
+                captured[name] = value
+
+        import io
+        audio_data = io.BytesIO(b'RIFF')
+
+        with patch('features.voice.voice_commands.aiohttp.FormData', FakeFormData):
+            with patch('aiohttp.ClientSession') as mock_session:
+                mock_response = AsyncMock()
+                mock_response.status = 200
+                mock_response.json = AsyncMock(return_value={'text': 'toca música'})
+                mock_post_cm = MagicMock()
+                mock_post_cm.__aenter__ = AsyncMock(return_value=mock_response)
+                mock_post_cm.__aexit__ = AsyncMock(return_value=None)
+                mock_session.return_value.__aenter__.return_value.post = MagicMock(return_value=mock_post_cm)
+
+                result = await sink._transcribe_sidecar(audio_data)
+
+        assert result == 'toca música'
+        assert captured['prompt'] == WHISPER_INITIAL_PROMPT
+        assert captured['file'] == b'RIFF'
+
+    @pytest.mark.asyncio
     async def test_transcribe_sidecar_handles_timeout(self, sink_instance):
         sink, _, _, _ = sink_instance
         
@@ -506,6 +690,100 @@ class TestVoiceCommandSinkHealthMonitoring:
         assert sink._health_monitor_started is False
         sink._start_health_monitor()
         assert sink._health_monitor_started is True
+
+    def test_listener_inactive_when_not_listening(self, sink_instance):
+        sink, _, mock_vc, _ = sink_instance
+        mock_vc.is_connected.return_value = True
+        mock_vc.is_listening.return_value = False
+
+        assert sink._listener_inactive() is True
+
+    def test_listener_inactive_when_healthy(self, sink_instance):
+        sink, _, mock_vc, _ = sink_instance
+        mock_vc.is_connected.return_value = True
+        mock_vc.is_listening.return_value = True
+        mock_vc._reader = None
+
+        assert sink._listener_inactive() is False
+
+    def test_listener_inactive_when_disconnected(self, sink_instance):
+        sink, _, mock_vc, _ = sink_instance
+        mock_vc.is_connected.return_value = False
+
+        assert sink._listener_inactive() is False
+
+    def test_listener_inactive_when_reader_has_error(self, sink_instance):
+        sink, _, mock_vc, _ = sink_instance
+        mock_vc.is_connected.return_value = True
+        mock_vc.is_listening.return_value = True
+        mock_reader = MagicMock()
+        mock_reader.error = RuntimeError('router died')
+        mock_vc._reader = mock_reader
+
+        assert sink._listener_inactive() is True
+
+    @pytest.mark.asyncio
+    async def test_recover_listener_skips_when_already_recovering(self, sink_instance):
+        sink, _, _, _ = sink_instance
+        sink._recovering_listener = True
+        sink._restart_listening = AsyncMock()
+        sink._trigger_reconnection = AsyncMock()
+
+        await sink._recover_listener()
+
+        sink._restart_listening.assert_not_awaited()
+        sink._trigger_reconnection.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_recover_listener_falls_back_to_reconnect(self, sink_instance):
+        sink, _, _, _ = sink_instance
+        sink._restart_listening = AsyncMock(return_value=False)
+        sink._trigger_reconnection = AsyncMock()
+
+        await sink._recover_listener()
+
+        sink._restart_listening.assert_awaited_once()
+        sink._trigger_reconnection.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_recover_listener_restarts_listen_before_reconnect(self, sink_instance):
+        sink, _, mock_vc, _ = sink_instance
+        sink._restart_listening = AsyncMock(return_value=True)
+        sink._trigger_reconnection = AsyncMock()
+
+        await sink._recover_listener()
+
+        sink._restart_listening.assert_awaited_once()
+        sink._trigger_reconnection.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_restart_listening_restarts_sink(self, sink_instance):
+        sink, _, mock_vc, _ = sink_instance
+        mock_vc.is_connected.return_value = True
+
+        result = await sink._restart_listening()
+
+        assert result is True
+        mock_vc.listen.assert_called_once_with(sink)
+
+    @pytest.mark.asyncio
+    async def test_reconnect_voice_client_passes_saved_channel(self, sink_instance):
+        sink, _, mock_vc, _ = sink_instance
+        mock_channel = MagicMock()
+        mock_vc.channel = mock_channel
+        mock_vc.is_connected.return_value = True
+        mock_vc.disconnect = AsyncMock()
+        new_vc = MagicMock()
+        sink.music_bot_ref = MagicMock()
+        sink.music_bot_ref.reconnect_voice_client = AsyncMock(return_value=new_vc)
+
+        result = await sink._reconnect_voice_client()
+
+        assert result is True
+        sink.music_bot_ref.reconnect_voice_client.assert_awaited_once_with(
+            sink.guild_id, channel=mock_channel
+        )
+        assert sink._voice_client is new_vc
 
     @pytest.mark.asyncio
     async def test_cancel_listening_task_cancels_and_removes(self, sink_instance):
@@ -670,12 +948,8 @@ class TestVoiceCommandErrorHandling:
         mock_member2.id = 888
         mock_member2.display_name = "User2"
 
-        from collections import deque
-        sink.audio_buffers[999] = deque(maxlen=150)
-        sink.audio_buffers[888] = deque(maxlen=150)
-        for _ in range(15):
-            sink.audio_buffers[999].append(b'chunk')
-            sink.audio_buffers[888].append(b'chunk')
+        _fill_speech_buffer(sink, 999)
+        _fill_speech_buffer(sink, 888)
         
         await asyncio.gather(
             sink.process_speech(mock_member1),
@@ -696,10 +970,7 @@ class TestVoiceCommandErrorHandling:
         mock_member.id = 999
         mock_member.display_name = "TestUser"
 
-        from collections import deque
-        sink.audio_buffers[999] = deque(maxlen=150)
-        for _ in range(15):
-            sink.audio_buffers[999].append(b'chunk')
+        _fill_speech_buffer(sink, 999)
 
         mock_vc.is_connected.return_value = False
         sink._voice_client = None
@@ -733,10 +1004,7 @@ class TestVoiceCommandErrorHandling:
         mock_member.id = 999
         mock_member.display_name = "TestUser"
 
-        from collections import deque
-        sink.audio_buffers[999] = deque(maxlen=150)
-        for _ in range(15):
-            sink.audio_buffers[999].append(b'chunk')
+        _fill_speech_buffer(sink, 999)
         
         await sink.process_speech(mock_member)
         
@@ -754,10 +1022,7 @@ class TestVoiceCommandErrorHandling:
         mock_member.id = 999
         mock_member.display_name = "TestUser"
 
-        from collections import deque
-        sink.audio_buffers[999] = deque(maxlen=150)
-        for _ in range(15):
-            sink.audio_buffers[999].append(b'chunk')
+        _fill_speech_buffer(sink, 999)
         
         await sink.process_speech(mock_member)
         
@@ -775,12 +1040,20 @@ class TestVoiceCommandErrorHandling:
         mock_member.id = 999
         mock_member.display_name = "TestUser"
 
-        from collections import deque
-        sink.audio_buffers[999] = deque(maxlen=150)
-        for _ in range(15):
-            sink.audio_buffers[999].append(b'chunk')
+        _fill_speech_buffer(sink, 999)
         
         await sink.process_speech(mock_member)
         
         assert sink._transcribe_audio.called
         sink._route_speech.assert_not_called()
+
+
+@pytest.mark.unit
+class TestVoiceRecvPatches:
+    def test_apply_voice_recv_patches_is_idempotent(self):
+        from features.voice import voice_recv_patches
+
+        voice_recv_patches._patched = False
+        voice_recv_patches.apply_voice_recv_patches()
+        voice_recv_patches.apply_voice_recv_patches()
+        assert voice_recv_patches._patched is True

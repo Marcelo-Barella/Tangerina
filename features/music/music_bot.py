@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import time
 from typing import Optional, Dict, Any
 import discord
 import yt_dlp
@@ -258,7 +257,12 @@ class MusicBot:
 
         return await YTDLSource.search_youtube(youtube_query, ytdl=self.ytdl)
 
-    async def reconnect_voice_client(self, guild_id: int, voice_recv_module=None) -> Optional[discord.VoiceClient]:
+    async def reconnect_voice_client(
+        self,
+        guild_id: int,
+        voice_recv_module=None,
+        channel=None,
+    ) -> Optional[discord.VoiceClient]:
         if voice_recv_module is None:
             try:
                 from discord.ext import voice_recv as vr_module
@@ -269,10 +273,11 @@ class MusicBot:
             logger.error(f"Cannot reconnect: no sink found for guild {guild_id}")
             return None
         sink = self.voice_sinks[guild_id]
-        if not sink._voice_client or not sink._voice_client.channel:
-            logger.error(f"Cannot reconnect: voice client or channel not available for guild {guild_id}")
-            return None
-        channel = sink._voice_client.channel
+        if channel is None:
+            if not sink._voice_client or not sink._voice_client.channel:
+                logger.error(f"Cannot reconnect: voice client or channel not available for guild {guild_id}")
+                return None
+            channel = sink._voice_client.channel
         try:
             if guild_id in self.voice_clients:
                 vc = self.voice_clients[guild_id]
@@ -292,7 +297,6 @@ class MusicBot:
                 sink._voice_client = vc
             sink._start_health_monitor()
             sink.last_audio_timestamps.clear()
-            sink._sink_created_time = time.time()
             logger.info(f"Successfully reconnected voice client for guild {guild_id}")
             return vc
         except Exception as e:

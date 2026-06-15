@@ -3,10 +3,12 @@ version: '3.8'
 services:
   whisper-asr:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: deploy/whisper/Dockerfile
     container_name: whisper-asr
     restart: unless-stopped
+    env_file:
+      - ../../.env
     environment:
       - WHISPER_MODEL=${WHISPER_MODEL:-base}
       - WHISPER_LANGUAGE=${WHISPER_LANGUAGE:-pt}
@@ -18,8 +20,8 @@ services:
       - ./cache:/app/.cache
     networks:
       - tangerina-network
-    mem_limit: 3g
-    mem_reservation: 2g
+    mem_limit: ${WHISPER_MEM_LIMIT:-512m}
+    mem_reservation: ${WHISPER_MEM_RESERVATION:-256m}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5002/health"]
       interval: 30s
