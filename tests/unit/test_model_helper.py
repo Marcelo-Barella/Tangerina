@@ -480,7 +480,7 @@ class TestBaseChatbotBuildToolMessage:
 
 
 @pytest.mark.unit
-class TestDeriveActionReply:
+class TestResolveToolResponse:
     def test_enter_channel_overrides_llm_text(self, test_chatbot):
         tool_calls = [
             {

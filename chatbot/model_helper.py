@@ -796,7 +796,10 @@ class BaseChatbot(ABC):
             return f"Erro ao executar ação: {tool_result.get('error', 'Erro desconhecido')}", send_mensagem_executed
         if tool_name == "SEND_Mensagem":
             return " ".join(sent_message_texts) if sent_message_texts else "", send_mensagem_executed
-        return "Ação executada com sucesso!", send_mensagem_executed
+        return (
+            self._resolve_tool_response(tool_calls_executed, send_mensagem_executed=send_mensagem_executed),
+            send_mensagem_executed,
+        )
 
     async def generate_response_with_tools(self, message: str, context: Optional[List[Dict]] = None,
                                           guild_id: Optional[int] = None, channel_id: Optional[int] = None,
