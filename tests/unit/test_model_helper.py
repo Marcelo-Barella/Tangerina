@@ -1,6 +1,7 @@
 import pytest
 import json
 from pathlib import Path
+from unittest.mock import MagicMock, AsyncMock
 from chatbot.model_helper import (
     build_tools_schema,
     build_tool_mapping,
@@ -9,7 +10,9 @@ from chatbot.model_helper import (
     load_tangerina_persona,
     build_system_text,
     DEFAULT_PERSONA_FALLBACK,
-    SYSTEM_PROMPT_TEMPLATE
+    SYSTEM_PROMPT_TEMPLATE,
+    is_join_voice_request,
+    text_claims_voice_join,
 )
 
 @pytest.mark.unit
@@ -305,9 +308,31 @@ class TestLoadTangerinaPersona:
         assert isinstance(result, str)
         assert len(result) > 0
 
-    def test_load_tangerina_persona_has_fallback(self):
+    def test_load_tangerina_persona_has_fallback(self, monkeypatch):
+        import builtins
+        real_open = builtins.open
+
+        def open_wrap(path, *args, **kwargs):
+            if "tangerina_persona.txt" in str(path):
+                raise FileNotFoundError(path)
+            return real_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "open", open_wrap)
         result = load_tangerina_persona()
-        assert len(result) > 0
+        assert result == DEFAULT_PERSONA_FALLBACK
+
+    def test_load_tangerina_persona_masculine_identity(self):
+        result = load_tangerina_persona()
+        assert "o Tangerina" in result
+        assert "masculino" in result
+        assert "Bergamota" in result
+        assert "515664341194768385" in result
+        assert "a Tangerina" not in result
+
+    def test_load_tangerina_persona_xml_structure(self):
+        result = load_tangerina_persona()
+        for tag in ("<context>", "<instructions>", "<examples>", "<formatting>"):
+            assert tag in result
 
     def test_load_tangerina_persona_falls_back_when_path_is_directory(self, tmp_path, monkeypatch):
         persona_dir = tmp_path / "tangerina_persona.txt"
@@ -323,6 +348,10 @@ class TestLoadTangerinaPersona:
 
     def test_default_persona_fallback_has_identity_section(self):
         assert 'IDENTIDADE' in DEFAULT_PERSONA_FALLBACK
+
+    def test_default_persona_fallback_masculine(self):
+        assert 'masculino' in DEFAULT_PERSONA_FALLBACK
+        assert 'o Tangerina' in DEFAULT_PERSONA_FALLBACK
 
 
 @pytest.mark.unit
@@ -462,3 +491,227 @@ class TestBaseChatbotBuildToolMessage:
         )
         assert valid
         assert error is None
+
+
+@pytest.mark.unit
+class TestDeriveActionReply:
+    def test_enter_channel_overrides_llm_text(self, test_chatbot):
+        tool_calls = [
+            {
+                "tool": "EnterChannel",
+                "result": {"success": True, "channel_name": "Geral"},
+            }
+        ]
+        final = test_chatbot._finalize_tool_response(
+            "Oi @Tangerina, você não está em um canal de voz.",
+            tool_calls,
+        )
+        assert final == "Pronto, entrei no Geral!"
+
+    def test_music_play_keeps_llm_text(self, test_chatbot):
+        tool_calls = [
+            {
+                "tool": "EnterChannel",
+                "result": {"success": True, "channel_name": "Geral"},
+            },
+            {
+                "tool": "MusicSpotifyPlay",
+                "result": {"success": True, "tracks_queued": 3},
+            },
+        ]
+        llm_text = "Adicionei 3 músicas na fila."
+        assert test_chatbot._finalize_tool_response(llm_text, tool_calls) == llm_text
+
+    def test_failed_enter_channel_keeps_llm_text(self, test_chatbot):
+        tool_calls = [
+            {
+                "tool": "EnterChannel",
+                "result": {"success": False, "error": "Failed"},
+            }
+        ]
+        llm_text = "Não consegui entrar no canal."
+        assert test_chatbot._finalize_tool_response(llm_text, tool_calls) == llm_text
+
+    def test_empty_llm_text_uses_enter_channel_reply(self, test_chatbot):
+        tool_calls = [
+            {
+                "tool": "EnterChannel",
+                "result": {"success": True, "channel_name": "Geral"},
+            }
+        ]
+        assert test_chatbot._fallback_tool_response(tool_calls, False) == "Pronto, entrei no Geral!"
+
+    def test_leave_channel_overrides_llm_text(self, test_chatbot):
+        tool_calls = [
+            {
+                "tool": "LeaveChannel",
+                "result": {"success": True},
+            }
+        ]
+        assert test_chatbot._finalize_tool_response("Ainda estou no canal.", tool_calls) == "Saí do canal de voz."
+
+
+@pytest.mark.unit
+class TestJoinVoiceHelpers:
+    def test_is_join_voice_request_matches_entra_na_chamada(self):
+        assert is_join_voice_request("@Tangerina Entra na chamada por favor")
+
+    def test_text_claims_voice_join_matches_entrei_na_chamada(self):
+        assert text_claims_voice_join("@1389316439193944275, entrei na chamada!")
+
+    @pytest.mark.asyncio
+    async def test_auto_enter_after_user_voice_channel(self, test_chatbot):
+        test_chatbot.music_bot = MagicMock()
+        voice_client = MagicMock()
+        voice_client.channel.name = "Geral"
+        test_chatbot.music_bot.join_voice_channel = AsyncMock(return_value=voice_client)
+
+        tool_calls = [
+            {
+                "tool": "GET_UserVoiceChannel",
+                "result": {
+                    "success": True,
+                    "in_voice_channel": True,
+                    "guild_id": 123,
+                    "channel_id": 456,
+                    "channel_name": "Geral",
+                },
+            }
+        ]
+        await test_chatbot._auto_enter_voice_if_needed(
+            "@Tangerina Entra na chamada por favor",
+            tool_calls,
+            {},
+            123,
+            789,
+        )
+        assert any(tc["tool"] == "EnterChannel" and tc["result"]["success"] for tc in tool_calls)
+        test_chatbot.music_bot.join_voice_channel.assert_awaited_once_with(123, 456)
+
+    @pytest.mark.asyncio
+    async def test_auto_enter_skips_non_join_message(self, test_chatbot):
+        test_chatbot.music_bot = MagicMock()
+        test_chatbot.music_bot.join_voice_channel = AsyncMock()
+        tool_calls = [
+            {
+                "tool": "GET_UserVoiceChannel",
+                "result": {
+                    "success": True,
+                    "in_voice_channel": True,
+                    "guild_id": 123,
+                    "channel_id": 456,
+                },
+            }
+        ]
+        await test_chatbot._auto_enter_voice_if_needed(
+            "qual é a fila de música?",
+            tool_calls,
+            {},
+            123,
+            789,
+        )
+        assert not any(tc["tool"] == "EnterChannel" for tc in tool_calls)
+        test_chatbot.music_bot.join_voice_channel.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_auto_enter_skips_when_enter_already_succeeded(self, test_chatbot):
+        test_chatbot.music_bot = MagicMock()
+        test_chatbot.music_bot.join_voice_channel = AsyncMock()
+        tool_calls = [
+            {
+                "tool": "GET_UserVoiceChannel",
+                "result": {
+                    "success": True,
+                    "in_voice_channel": True,
+                    "guild_id": 123,
+                    "channel_id": 456,
+                },
+            },
+            {
+                "tool": "EnterChannel",
+                "result": {"success": True, "channel_name": "Geral"},
+            },
+        ]
+        await test_chatbot._auto_enter_voice_if_needed(
+            "@Tangerina Entra na chamada por favor",
+            tool_calls,
+            {},
+            123,
+            789,
+        )
+        test_chatbot.music_bot.join_voice_channel.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_send_mensagem_blocks_voice_join_claim(self, test_chatbot):
+        test_chatbot.bot = MagicMock()
+        result = await test_chatbot._handle_send_mensagem(
+            {"channel_id": 1, "text": "entrei na chamada!"},
+            {},
+        )
+        assert result["success"] is False
+        test_chatbot.bot.get_channel.assert_not_called()
+
+
+def _make_tool_calls_api_response(tool_name: str, params: dict, tool_call_id: str = "tc1"):
+    tool_call = MagicMock()
+    tool_call.id = tool_call_id
+    tool_call.function.name = tool_name
+    tool_call.function.arguments = json.dumps(params)
+    choice = MagicMock()
+    choice.finish_reason = "tool_calls"
+    choice.message.content = None
+    choice.message.tool_calls = [tool_call]
+    response = MagicMock()
+    response.choices = [choice]
+    return response
+
+
+@pytest.mark.unit
+class TestGenerateResponseApiFailure:
+    @pytest.fixture
+    def api_failure_chatbot(self):
+        from chatbot.model_helper import BaseChatbot
+
+        class ApiFailureChatbot(BaseChatbot):
+            def __init__(self):
+                self._tools_schema = build_tools_schema()
+                self._tool_mapping = build_tool_mapping(self._tools_schema)
+                self.persona_context = ""
+                self._api_call = 0
+                self.music_bot = MagicMock()
+                voice_client = MagicMock()
+                voice_client.channel.name = "Geral"
+                self.music_bot.join_voice_channel = AsyncMock(return_value=voice_client)
+
+            def _initialize_client(self, api_key):
+                pass
+
+            async def _make_api_request(self, messages, max_tokens=1000, tools=None):
+                self._api_call += 1
+                if self._api_call == 1:
+                    return _make_tool_calls_api_response(
+                        "EnterChannel", {"guild_id": 123, "channel_id": 456}
+                    )
+                raise RuntimeError("API 400")
+
+            def _extract_tool_calls(self, choice):
+                return getattr(choice.message, "tool_calls", None) or []
+
+            def _extract_choice_content(self, choice):
+                return getattr(choice.message, "content", None)
+
+            def _get_models_to_try(self):
+                return ["test-model"]
+
+        return ApiFailureChatbot()
+
+    @pytest.mark.asyncio
+    async def test_api_failure_after_enter_returns_action_reply(self, api_failure_chatbot):
+        text, tool_calls = await api_failure_chatbot.generate_response_with_tools(
+            "Tangerina entra na chamada",
+            guild_id=123,
+            user_id=789,
+        )
+        assert text == "Pronto, entrei no Geral!"
+        assert api_failure_chatbot._api_call == 2
+        assert any(tc["tool"] == "EnterChannel" and tc["result"]["success"] for tc in tool_calls)
