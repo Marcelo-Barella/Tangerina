@@ -895,6 +895,12 @@ class BaseChatbot(ABC):
                     response_text, msg_executed = tool_call_result
                     if msg_executed:
                         send_mensagem_executed = True
+                    await self._auto_enter_voice_if_needed(
+                        message, tool_calls_executed, app_functions or {}, guild_id, user_id
+                    )
+                    action_reply = self._derive_action_reply(tool_calls_executed)
+                    if action_reply:
+                        response_text = action_reply
                     return response_text, tool_calls_executed
                 
                 if any(marker in content_stripped.lower() for marker in ["</tool_call>", "<arg_key>", "<arg_value>", "<tool_call>"]):
