@@ -22,10 +22,6 @@ def _install_app_stubs() -> None:
     dotenv_module = ModuleType("dotenv")
     dotenv_module.load_dotenv = MagicMock()
     sys.modules["dotenv"] = dotenv_module
-    aiohttp_module = ModuleType("aiohttp")
-    aiohttp_module.ClientSession = MagicMock()
-    aiohttp_module.ClientTimeout = MagicMock()
-    sys.modules["aiohttp"] = aiohttp_module
 
     music_bot_module = ModuleType("features.music.music_bot")
     music_bot_module.MusicBot = MagicMock(return_value=MagicMock())
@@ -52,7 +48,6 @@ _STUBBED_MODULES = (
     "discord.ext.commands",
     "yt_dlp",
     "dotenv",
-    "aiohttp",
     "features.music.music_bot",
     "features.music.music_service",
     "features.tts.tts_handler",
@@ -133,3 +128,35 @@ class TestAppOmnivoiceRegistration:
             app_module = _reload_app(env)
         assert "omnivoice" in app_module.tts_providers
         factory.assert_called_once()
+
+
+@pytest.mark.unit
+class TestAppWhisperProvider:
+    def test_defaults_to_openai_api_when_key_set(self):
+        app_module = _reload_app(
+            {"DISCORD_BOT_TOKEN": "test-token", "OPENAI_API_KEY": "sk-test"}
+        )
+        assert app_module.music_bot.whisper_provider == "openai-api"
+        assert app_module.music_bot.openai_api_key == "sk-test"
+
+    def test_defaults_to_sidecar_without_key(self):
+        app_module = _reload_app({"DISCORD_BOT_TOKEN": "test-token"})
+        assert app_module.music_bot.whisper_provider == "sidecar"
+        assert app_module.music_bot.openai_api_key is None
+
+    def test_defaults_to_sidecar_when_key_blank(self):
+        app_module = _reload_app(
+            {"DISCORD_BOT_TOKEN": "test-token", "OPENAI_API_KEY": "   "}
+        )
+        assert app_module.music_bot.whisper_provider == "sidecar"
+        assert app_module.music_bot.openai_api_key is None
+
+    def test_explicit_provider_is_honored(self):
+        app_module = _reload_app(
+            {
+                "DISCORD_BOT_TOKEN": "test-token",
+                "WHISPER_PROVIDER": "zhipu",
+                "OPENAI_API_KEY": "sk-test",
+            }
+        )
+        assert app_module.music_bot.whisper_provider == "zhipu"

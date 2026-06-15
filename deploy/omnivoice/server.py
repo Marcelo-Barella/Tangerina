@@ -36,7 +36,7 @@ class InferenceTimeout(TimeoutError):
 def _generation_kwargs(text: str) -> Dict[str, Any]:
     return {
         "text": text,
-        "instruct": os.getenv("OMNIVOICE_INSTRUCT", "female, brazilian accent"),
+        "instruct": os.getenv("OMNIVOICE_INSTRUCT", "female, portuguese accent"),
         "num_step": int(os.getenv("OMNIVOICE_NUM_STEP", "16")),
         "speed": float(os.getenv("OMNIVOICE_SPEED", "1.0")),
     }
@@ -136,7 +136,7 @@ def health() -> Tuple[Response, int]:
             "device": _model_state["device"],
             "precision": _model_state["precision"],
             "model": _model_state["model_id"],
-            "instruct": os.getenv("OMNIVOICE_INSTRUCT", "female, brazilian accent"),
+            "instruct": os.getenv("OMNIVOICE_INSTRUCT", "female, portuguese accent"),
             "vram_estimate_gb": _model_state["vram_estimate_gb"],
         }
     ), 200

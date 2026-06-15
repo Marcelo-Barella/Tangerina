@@ -64,7 +64,7 @@ services:
     container_name: tangerina-omnivoice-tts
     restart: unless-stopped
     environment:
-      - OMNIVOICE_INSTRUCT=${OMNIVOICE_INSTRUCT:-female, brazilian accent}
+      - OMNIVOICE_INSTRUCT=${OMNIVOICE_INSTRUCT:-female, portuguese accent}
       - OMNIVOICE_PRECISION=${OMNIVOICE_PRECISION:-int8}
       - OMNIVOICE_DEVICE=${OMNIVOICE_DEVICE:-auto}
       - OMNIVOICE_MODEL=${OMNIVOICE_MODEL:-k2-fsa/OmniVoice}
