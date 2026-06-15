@@ -207,7 +207,7 @@ Aguarde o health check em `http://localhost:5003/health` (primeira execução ba
 ```env
 TTS_PROVIDER=omnivoice
 OMNIVOICE_API_URL=http://omnivoice-tts:5003
-OMNIVOICE_INSTRUCT=female, brazilian accent
+OMNIVOICE_INSTRUCT=female, portuguese accent
 OMNIVOICE_PRECISION=int8
 OMNIVOICE_TIMEOUT=90
 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
@@ -216,7 +216,7 @@ PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 | Variável | Padrão | Descrição |
 |----------|--------|-----------|
 | `OMNIVOICE_API_URL` | — | URL do sidecar HTTP |
-| `OMNIVOICE_INSTRUCT` | `female, brazilian accent` | Voz fixa (voice design) |
+| `OMNIVOICE_INSTRUCT` | `female, portuguese accent` | Voz fixa (voice design) |
 | `OMNIVOICE_PRECISION` | `int8` | `int8` (6 GB VRAM), `int4` ou `fp16` (8 GB+) |
 | `OMNIVOICE_TIMEOUT` | `90` | Timeout das requisições TTS |
 
