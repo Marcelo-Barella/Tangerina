@@ -25,6 +25,7 @@ _model_ready = False
 _model_lock = threading.Lock()
 _load_error: Optional[str] = None
 _hung_inference_thread: Optional[threading.Thread] = None
+_DEFAULT_INSTRUCT = "female, portuguese accent"
 
 
 class InferenceTimeout(TimeoutError):
@@ -36,7 +37,7 @@ class InferenceTimeout(TimeoutError):
 def _generation_kwargs(text: str) -> Dict[str, Any]:
     return {
         "text": text,
-        "instruct": os.getenv("OMNIVOICE_INSTRUCT", "female, portuguese accent"),
+        "instruct": os.getenv("OMNIVOICE_INSTRUCT", _DEFAULT_INSTRUCT),
         "num_step": int(os.getenv("OMNIVOICE_NUM_STEP", "16")),
         "speed": float(os.getenv("OMNIVOICE_SPEED", "1.0")),
     }
@@ -136,7 +137,7 @@ def health() -> Tuple[Response, int]:
             "device": _model_state["device"],
             "precision": _model_state["precision"],
             "model": _model_state["model_id"],
-            "instruct": os.getenv("OMNIVOICE_INSTRUCT", "female, portuguese accent"),
+            "instruct": os.getenv("OMNIVOICE_INSTRUCT", _DEFAULT_INSTRUCT),
             "vram_estimate_gb": _model_state["vram_estimate_gb"],
         }
     ), 200

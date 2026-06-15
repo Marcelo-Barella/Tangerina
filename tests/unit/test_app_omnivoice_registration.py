@@ -22,6 +22,10 @@ def _install_app_stubs() -> None:
     dotenv_module = ModuleType("dotenv")
     dotenv_module.load_dotenv = MagicMock()
     sys.modules["dotenv"] = dotenv_module
+    aiohttp_module = ModuleType("aiohttp")
+    aiohttp_module.ClientSession = MagicMock()
+    aiohttp_module.ClientTimeout = MagicMock()
+    sys.modules["aiohttp"] = aiohttp_module
 
     music_bot_module = ModuleType("features.music.music_bot")
     music_bot_module.MusicBot = MagicMock(return_value=MagicMock())
@@ -48,6 +52,7 @@ _STUBBED_MODULES = (
     "discord.ext.commands",
     "yt_dlp",
     "dotenv",
+    "aiohttp",
     "features.music.music_bot",
     "features.music.music_service",
     "features.tts.tts_handler",
