@@ -463,7 +463,7 @@ class BaseChatbot(ABC):
             tool = tc.get("tool")
             result = tc.get("result") or {}
             if not result.get("success"):
-                continue
+                return None
             if tool in skip_override:
                 return None
             replier = terminal_tools.get(tool)
