@@ -7,7 +7,6 @@ import discord
 from discord import Intents
 from discord.ext import commands
 from dotenv import load_dotenv
-import aiohttp
 
 try:
     from features.music.spotify_integration import SpotifyIntegration
@@ -59,6 +58,10 @@ from features.music.music_bot import MusicBot, YTDLSource
 from features.music.music_service import MusicService, _resolve_voice_channel
 from features.tts.tts_handler import speak_tts_unified
 from flask_routes import create_flask_app
+from features.discord.chatbot_reply import (
+    post_chatbot_reply,
+    should_respond_with_chatbot,
+)
 
 load_dotenv()
 
@@ -69,9 +72,6 @@ DISCORD_BOT_TOKEN = os.getenv('DISCORD_BOT_TOKEN')
 if not DISCORD_BOT_TOKEN:
     raise ValueError('DISCORD_BOT_TOKEN environment variable is required')
 
-N8N_WEBHOOK_URL = os.getenv('N8N_WEBHOOK_URL')
-if not N8N_WEBHOOK_URL:
-    logger.warning('N8N_WEBHOOK_URL not set. n8n integration will be disabled.')
 
 intents = Intents.default()
 intents.message_content = True
@@ -174,53 +174,6 @@ flask_app, set_bot_loop = create_flask_app(
     bot, music_bot, music_service, chatbot, speak_tts, 'omnivoice' in tts_providers
 )
 
-async def forward_to_n8n(msg_data: Dict[str, Any]) -> Optional[int]:
-    if not N8N_WEBHOOK_URL:
-        return None
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                N8N_WEBHOOK_URL,
-                json=msg_data,
-                headers={'Content-Type': 'application/json'},
-                timeout=aiohttp.ClientTimeout(total=10)
-            ) as response:
-                logger.info(f'Forwarded message to n8n, status: {response.status}')
-                return response.status
-    except asyncio.TimeoutError:
-        logger.error('Timeout forwarding message to n8n')
-        return None
-    except Exception as e:
-        logger.error(f'Error forwarding to n8n: {e}')
-        return None
-
-def extract_message_data(message: discord.Message) -> Dict[str, Any]:
-    return {
-        'content': message.content,
-        'author': {
-            'id': str(message.author.id),
-            'name': message.author.name,
-            'discriminator': message.author.discriminator,
-            'bot': message.author.bot
-        },
-        'channel': {
-            'id': str(message.channel.id),
-            'name': getattr(message.channel, 'name', None)
-        },
-        'guild': {
-            'id': str(message.guild.id) if message.guild else None,
-            'name': message.guild.name if message.guild else None
-        },
-        'message_id': str(message.id),
-        'timestamp': message.created_at.isoformat(),
-        'embeds': [embed.to_dict() for embed in message.embeds],
-        'attachments': [
-            {'id': str(att.id), 'filename': att.filename, 'url': att.url, 'size': att.size}
-            for att in message.attachments
-        ]
-    }
-
-
 @bot.event
 async def on_ready() -> None:
     global bot_loop
@@ -234,22 +187,17 @@ async def on_ready() -> None:
         chatbot.music_bot = music_bot
         logger.info(f"{MODEL_PROVIDER.capitalize()} chatbot configured")
 
-def should_respond_with_chatbot(message) -> bool:
-    if message.author.bot:
-        return False
-    content = message.content.lower().strip()
-    return 'tangerina' in content or (bot.user and bot.user.mentioned_in(message)) or message.guild is None
-
 @bot.event
 async def on_message(message: discord.Message) -> None:
     if message.author.bot:
         return
 
+    will_respond = bool(chatbot and should_respond_with_chatbot(message, bot.user))
+
     await bot.process_commands(message)
 
     try:
-        msg_data = extract_message_data(message)
-        if chatbot and should_respond_with_chatbot(message):
+        if will_respond:
             guild_id = message.guild.id if message.guild else None
             channel_id = message.channel.id
             user_id = message.author.id
@@ -279,10 +227,7 @@ async def on_message(message: discord.Message) -> None:
             if chatbot.memory_manager:
                 await chatbot.memory_manager.store_conversation(message.content, response, guild_id, channel_id, user_id, tool_calls)
 
-            msg_data.update({'chatbot_response': response, 'tool_calls': tool_calls})
-
-        if N8N_WEBHOOK_URL:
-            await forward_to_n8n(msg_data)
+            await post_chatbot_reply(message.channel, response, tool_calls)
 
     except Exception as e:
         logger.error(f'Error processing message: {e}')
