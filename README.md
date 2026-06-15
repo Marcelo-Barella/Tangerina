@@ -895,7 +895,7 @@ O bot utiliza um arquivo de persona personalizado para definir o comportamento e
 
 **Localização:**
 - Em execução local: `chatbot/tangerina_persona.txt`
-- Em Docker: montado como volume em `/app/tangerina_persona.txt`
+- Em Docker: montado como volume em `/app/chatbot/tangerina_persona.txt`
 
 **Formato:**
 O arquivo deve conter texto em português brasileiro descrevendo a personalidade, estilo de comunicação e características da Tangerina.
