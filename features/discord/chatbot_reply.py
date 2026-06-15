@@ -1,6 +1,8 @@
 import logging
 from typing import Any, Optional
 
+from chatbot.model_helper import terminal_action_reply
+
 logger = logging.getLogger(__name__)
 
 DISCORD_MESSAGE_LIMIT = 2000
@@ -77,14 +79,13 @@ def should_post_chatbot_reply(
 def resolve_chatbot_response(
     response: Any,
     tool_calls: Optional[list[dict[str, Any]]],
-    chatbot: Any = None,
 ) -> str:
     if isinstance(response, str):
         stripped = response.strip()
         if stripped and stripped not in _SUPPRESSED_RESPONSES:
             return stripped
-    if chatbot and tool_calls:
-        action_reply = chatbot._derive_fallback_action_reply(tool_calls)
+    if tool_calls:
+        action_reply = terminal_action_reply(tool_calls, skip_non_terminal=True)
         if action_reply:
             return action_reply
     return ""

@@ -39,6 +39,37 @@ def is_join_voice_request(message: str) -> bool:
 def text_claims_voice_join(text: str) -> bool:
     return bool(_JOIN_VOICE_CLAIM_RE.search(text.strip()))
 
+
+_TERMINAL_TOOL_REPLIES = {
+    "EnterChannel": lambda r: f"Pronto, entrei no {r.get('channel_name') or 'canal de voz'}!",
+    "LeaveChannel": lambda _: "Saí do canal de voz.",
+    "MusicLeave": lambda _: "Saí do canal de voz.",
+}
+_SKIP_TERMINAL_OVERRIDE = frozenset({
+    "MusicPlay", "MusicSpotifyPlay", "SEND_Mensagem", "TTSSpeak",
+})
+
+
+def terminal_action_reply(
+    tool_calls_executed: List[Dict[str, Any]],
+    *,
+    skip_non_terminal: bool = False,
+) -> Optional[str]:
+    for tc in reversed(tool_calls_executed):
+        tool = tc.get("tool")
+        result = tc.get("result") or {}
+        if not result.get("success"):
+            continue
+        if tool in _SKIP_TERMINAL_OVERRIDE:
+            if skip_non_terminal:
+                continue
+            return None
+        replier = _TERMINAL_TOOL_REPLIES.get(tool)
+        if replier:
+            return replier(result)
+    return None
+
+
 DEFAULT_PERSONA_FALLBACK = "\n".join([
     "IDENTIDADE",
     "- Nome: Tangerina",
@@ -459,47 +490,13 @@ class BaseChatbot(ABC):
         tool_calls_executed.append({"tool": "EnterChannel", "parameters": params, "result": result})
         logger.info(f"Auto EnterChannel after join request: {json.dumps(result, ensure_ascii=False)}")
 
-    def _terminal_action_reply(
-        self,
-        tool_calls_executed: List[Dict[str, Any]],
-        *,
-        skip_non_terminal: bool,
-    ) -> Optional[str]:
-        terminal_tools = {
-            "EnterChannel": lambda r: f"Pronto, entrei no {r.get('channel_name') or 'canal de voz'}!",
-            "LeaveChannel": lambda _: "Saí do canal de voz.",
-            "MusicLeave": lambda _: "Saí do canal de voz.",
-        }
-        skip_override = frozenset({
-            "MusicPlay", "MusicSpotifyPlay", "SEND_Mensagem", "TTSSpeak",
-        })
-        for tc in reversed(tool_calls_executed):
-            tool = tc.get("tool")
-            result = tc.get("result") or {}
-            if not result.get("success"):
-                continue
-            if tool in skip_override:
-                if skip_non_terminal:
-                    continue
-                return None
-            replier = terminal_tools.get(tool)
-            if replier:
-                return replier(result)
-        return None
-
-    def _derive_action_reply(self, tool_calls_executed: List[Dict[str, Any]]) -> Optional[str]:
-        return self._terminal_action_reply(tool_calls_executed, skip_non_terminal=False)
-
-    def _derive_fallback_action_reply(self, tool_calls_executed: List[Dict[str, Any]]) -> Optional[str]:
-        return self._terminal_action_reply(tool_calls_executed, skip_non_terminal=True)
-
     def _resolve_tool_response(
         self,
         tool_calls_executed: List[Dict[str, Any]],
         content: Optional[str] = None,
         send_mensagem_executed: bool = False,
     ) -> str:
-        action_reply = self._derive_action_reply(tool_calls_executed)
+        action_reply = terminal_action_reply(tool_calls_executed)
         if action_reply:
             return action_reply
         if content is not None:
@@ -895,7 +892,7 @@ class BaseChatbot(ABC):
                                 tool_calls_executed,
                             )
                     if tool_calls_executed:
-                        action_reply = self._derive_action_reply(tool_calls_executed)
+                        action_reply = terminal_action_reply(tool_calls_executed)
                         if action_reply:
                             return action_reply, tool_calls_executed
                     break
@@ -976,7 +973,7 @@ class BaseChatbot(ABC):
                 
             except Exception as e:
                 logger.error(f"API request failed: {e}")
-                action_reply = self._derive_action_reply(tool_calls_executed)
+                action_reply = terminal_action_reply(tool_calls_executed)
                 if action_reply:
                     return action_reply, tool_calls_executed
                 return "Deu ruim aqui do meu lado. Tenta de novo em instantes.", tool_calls_executed

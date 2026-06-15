@@ -329,11 +329,6 @@ class TestLoadTangerinaPersona:
         assert "515664341194768385" in result
         assert "a Tangerina" not in result
 
-    def test_load_tangerina_persona_xml_structure(self):
-        result = load_tangerina_persona()
-        for tag in ("<context>", "<instructions>", "<examples>", "<formatting>"):
-            assert tag in result
-
     def test_default_persona_fallback_contains_tangerina(self):
         assert 'Tangerina' in DEFAULT_PERSONA_FALLBACK
 

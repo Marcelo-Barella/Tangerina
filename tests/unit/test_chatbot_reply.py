@@ -167,26 +167,22 @@ class TestShouldPostChatbotReply:
 class TestResolveChatbotResponse:
     def test_non_empty_response_unchanged(self):
         tool_calls = [{"tool": "EnterChannel", "result": {"success": True, "channel_name": "Geral"}}]
-        assert resolve_chatbot_response("Olá!", tool_calls, None) == "Olá!"
+        assert resolve_chatbot_response("Olá!", tool_calls) == "Olá!"
 
     def test_empty_response_uses_action_reply(self):
         tool_calls = [
             {"tool": "EnterChannel", "result": {"success": True, "channel_name": "Geral"}},
         ]
-        chatbot = MagicMock()
-        chatbot._derive_fallback_action_reply.return_value = "Pronto, entrei no Geral!"
-        assert resolve_chatbot_response("", tool_calls, chatbot) == "Pronto, entrei no Geral!"
+        assert resolve_chatbot_response("", tool_calls) == "Pronto, entrei no Geral!"
 
     def test_empty_response_without_derive_stays_empty(self):
-        assert resolve_chatbot_response("", [], None) == ""
+        assert resolve_chatbot_response("", []) == ""
 
     def test_suppressed_fallback_uses_action_reply(self):
         tool_calls = [
             {"tool": "EnterChannel", "result": {"success": True, "channel_name": "Geral"}},
         ]
-        chatbot = MagicMock()
-        chatbot._derive_fallback_action_reply.return_value = "Pronto, entrei no Geral!"
-        assert resolve_chatbot_response("Ação executada.", tool_calls, chatbot) == "Pronto, entrei no Geral!"
+        assert resolve_chatbot_response("Ação executada.", tool_calls) == "Pronto, entrei no Geral!"
 
 
 @pytest.mark.unit
