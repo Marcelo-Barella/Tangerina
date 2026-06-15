@@ -8,10 +8,17 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 _JOIN_VOICE_REQUEST_RE = re.compile(
-    r"(?:entra|entre|entrar|join|conecta|conectar).{0,40}(?:chamada|canal|voice|voz|call)"
-    r"|(?:chamada|canal\s+de\s+voz).{0,20}(?:entra|entre|join)",
+    r"(?:"
+    r"(?:entra|entre|entrar|join|conecta|conectar).{0,25}(?:chamada|call|voice(?:\s+channel)?|voz|canal\s+de\s+voz)"
+    r"|(?:chamada|canal\s+de\s+voz|voice(?:\s+channel)?).{0,20}(?:entra|entre|join)"
+    r")",
     re.IGNORECASE,
 )
+_JOIN_VOICE_NEGATION_RE = re.compile(
+    r"\bn[aã]o\s+(?:entra|entre|entrar|join|conecta|conectar)\b",
+    re.IGNORECASE,
+)
+_JOIN_VOICE_HOW_TO_RE = re.compile(r"\bcomo\s+entrar\b", re.IGNORECASE)
 _JOIN_VOICE_CLAIM_RE = re.compile(
     r"\b(entrei|entrou|joining|joined|conectei|conectado)\b.{0,40}\b(chamada|canal|voice|voz|call)\b",
     re.IGNORECASE,
@@ -19,7 +26,14 @@ _JOIN_VOICE_CLAIM_RE = re.compile(
 
 
 def is_join_voice_request(message: str) -> bool:
-    return bool(_JOIN_VOICE_REQUEST_RE.search(message.strip()))
+    text = message.strip()
+    if not text:
+        return False
+    if _JOIN_VOICE_NEGATION_RE.search(text):
+        return False
+    if _JOIN_VOICE_HOW_TO_RE.search(text):
+        return False
+    return bool(_JOIN_VOICE_REQUEST_RE.search(text))
 
 
 def text_claims_voice_join(text: str) -> bool:
@@ -450,7 +464,12 @@ class BaseChatbot(ABC):
         tool_calls_executed.append({"tool": "EnterChannel", "parameters": params, "result": result})
         logger.info(f"Auto EnterChannel after join request: {json.dumps(result, ensure_ascii=False)}")
 
-    def _derive_action_reply(self, tool_calls_executed: List[Dict[str, Any]]) -> Optional[str]:
+    def _derive_action_reply(
+        self,
+        tool_calls_executed: List[Dict[str, Any]],
+        *,
+        for_fallback: bool = False,
+    ) -> Optional[str]:
         terminal_tools = {
             "EnterChannel": lambda r: f"Pronto, entrei no {r.get('channel_name') or 'canal de voz'}!",
             "LeaveChannel": lambda _: "Saí do canal de voz.",
@@ -465,6 +484,8 @@ class BaseChatbot(ABC):
             if not result.get("success"):
                 continue
             if tool in skip_override:
+                if for_fallback:
+                    continue
                 return None
             replier = terminal_tools.get(tool)
             if replier:
@@ -486,7 +507,7 @@ class BaseChatbot(ABC):
         tool_calls_executed: List[Dict[str, Any]],
         send_mensagem_executed: bool,
     ) -> str:
-        action_reply = self._derive_action_reply(tool_calls_executed)
+        action_reply = self._derive_action_reply(tool_calls_executed, for_fallback=True)
         if action_reply:
             return action_reply
         if send_mensagem_executed:

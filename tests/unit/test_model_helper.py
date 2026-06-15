@@ -513,6 +513,19 @@ class TestDeriveActionReply:
         llm_text = "Adicionei 3 músicas na fila."
         assert test_chatbot._finalize_tool_response(llm_text, tool_calls) == llm_text
 
+    def test_music_play_fallback_uses_enter_channel_reply(self, test_chatbot):
+        tool_calls = [
+            {
+                "tool": "EnterChannel",
+                "result": {"success": True, "channel_name": "Geral"},
+            },
+            {
+                "tool": "MusicPlay",
+                "result": {"success": True, "message": "Now playing: song"},
+            },
+        ]
+        assert test_chatbot._fallback_tool_response(tool_calls, False) == "Pronto, entrei no Geral!"
+
     def test_failed_enter_channel_keeps_llm_text(self, test_chatbot):
         tool_calls = [
             {
@@ -546,6 +559,15 @@ class TestDeriveActionReply:
 class TestJoinVoiceHelpers:
     def test_is_join_voice_request_matches_entra_na_chamada(self):
         assert is_join_voice_request("@Tangerina Entra na chamada por favor")
+
+    def test_is_join_voice_request_rejects_negation(self):
+        assert not is_join_voice_request("não entra na chamada")
+
+    def test_is_join_voice_request_rejects_questions(self):
+        assert not is_join_voice_request("quando você entra no canal?")
+
+    def test_is_join_voice_request_rejects_how_to(self):
+        assert not is_join_voice_request("explica como entrar no canal de voz")
 
     def test_text_claims_voice_join_matches_entrei_na_chamada(self):
         assert text_claims_voice_join("@1389316439193944275, entrei na chamada!")
