@@ -28,7 +28,7 @@ def apply_voice_recv_patches() -> None:
             try:
                 pcm = self._decoder.decode(packet.decrypted_data, fec=False)
                 return packet, pcm
-            except OpusError:
+            except OpusError as exc:
                 try:
                     pcm = self._decoder.decode(packet.decrypted_data, fec=True)
                     return packet, pcm
@@ -40,10 +40,10 @@ def apply_voice_recv_patches() -> None:
                     except OpusError:
                         pass
                     logger.warning(
-                        "Opus decode failed for ssrc %s, skipping packet",
+                        "Opus decode failed for ssrc %s after FEC recovery",
                         getattr(self, 'ssrc', '?'),
                     )
-                    return packet, b''
+                    raise exc
 
         return original_decode(self, packet)
 

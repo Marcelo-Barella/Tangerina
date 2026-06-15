@@ -20,8 +20,8 @@ services:
       - ./cache:/app/.cache
     networks:
       - tangerina-network
-    mem_limit: ${WHISPER_MEM_LIMIT:-512m}
-    mem_reservation: ${WHISPER_MEM_RESERVATION:-256m}
+    mem_limit: ${WHISPER_MEM_LIMIT:-3g}
+    mem_reservation: ${WHISPER_MEM_RESERVATION:-2g}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5002/health"]
       interval: 30s
