@@ -25,6 +25,8 @@ def is_join_voice_request(message: str) -> bool:
 def text_claims_voice_join(text: str) -> bool:
     return bool(_JOIN_VOICE_CLAIM_RE.search(text.strip()))
 
+_VOICE_LEAVE_REPLY = "Saí do canal de voz."
+
 DEFAULT_PERSONA_FALLBACK = "\n".join([
     "IDENTIDADE",
     "- Nome: Tangerina",
@@ -411,12 +413,6 @@ class BaseChatbot(ABC):
         
         return True, None
 
-    def _enter_channel_succeeded(self, tool_calls_executed: List[Dict[str, Any]]) -> bool:
-        return any(
-            tc.get("tool") == "EnterChannel" and (tc.get("result") or {}).get("success")
-            for tc in tool_calls_executed
-        )
-
     def _latest_user_voice_channel_result(
         self, tool_calls_executed: List[Dict[str, Any]]
     ) -> Optional[Dict[str, Any]]:
@@ -435,7 +431,12 @@ class BaseChatbot(ABC):
         guild_id: Optional[int],
         user_id: Optional[int],
     ) -> None:
-        if not is_join_voice_request(message) or self._enter_channel_succeeded(tool_calls_executed):
+        if not is_join_voice_request(message):
+            return
+        if any(
+            tc.get("tool") == "EnterChannel" and (tc.get("result") or {}).get("success")
+            for tc in tool_calls_executed
+        ):
             return
         uvc = self._latest_user_voice_channel_result(tool_calls_executed)
         if not uvc or not uvc.get("in_voice_channel") or not uvc.get("channel_id"):
@@ -453,8 +454,8 @@ class BaseChatbot(ABC):
     def _derive_action_reply(self, tool_calls_executed: List[Dict[str, Any]]) -> Optional[str]:
         terminal_tools = {
             "EnterChannel": lambda r: f"Pronto, entrei no {r.get('channel_name') or 'canal de voz'}!",
-            "LeaveChannel": lambda _: "Saí do canal de voz.",
-            "MusicLeave": lambda _: "Saí do canal de voz.",
+            "LeaveChannel": lambda _: _VOICE_LEAVE_REPLY,
+            "MusicLeave": lambda _: _VOICE_LEAVE_REPLY,
         }
         skip_override = frozenset({
             "MusicPlay", "MusicSpotifyPlay", "SEND_Mensagem", "TTSSpeak",
@@ -880,7 +881,7 @@ class BaseChatbot(ABC):
                                 tool_calls_executed,
                             )
                     if tool_calls_executed:
-                        action_reply = self._derive_action_reply(tool_calls_executed)
+                        action_reply = self._finalize_tool_response("", tool_calls_executed)
                         if action_reply:
                             return action_reply, tool_calls_executed
                     break
@@ -898,9 +899,7 @@ class BaseChatbot(ABC):
                     await self._auto_enter_voice_if_needed(
                         message, tool_calls_executed, app_functions or {}, guild_id, user_id
                     )
-                    action_reply = self._derive_action_reply(tool_calls_executed)
-                    if action_reply:
-                        response_text = action_reply
+                    response_text = self._finalize_tool_response(response_text, tool_calls_executed)
                     return response_text, tool_calls_executed
                 
                 if any(marker in content_stripped.lower() for marker in ["</tool_call>", "<arg_key>", "<arg_value>", "<tool_call>"]):
@@ -955,17 +954,14 @@ class BaseChatbot(ABC):
                 
             except Exception as e:
                 logger.error(f"API request failed: {e}")
-                action_reply = self._derive_action_reply(tool_calls_executed)
+                action_reply = self._finalize_tool_response("", tool_calls_executed)
                 if action_reply:
                     return action_reply, tool_calls_executed
                 return "Deu ruim aqui do meu lado. Tenta de novo em instantes.", tool_calls_executed
         
         logger.warning(f"Exceeded maximum iterations ({max_iterations}) without completion")
         if tool_calls_executed:
-            action_reply = self._derive_action_reply(tool_calls_executed)
-            if action_reply:
-                return action_reply, tool_calls_executed
-            return "Ação executada.", tool_calls_executed
+            return self._fallback_tool_response(tool_calls_executed, False), tool_calls_executed
         return "Tive um problema pra responder agora. Tenta de novo?", tool_calls_executed
 
     async def generate_response(self, message: str, context: Optional[List[Dict]] = None) -> str:
