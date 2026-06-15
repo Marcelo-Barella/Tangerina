@@ -505,6 +505,17 @@ class BaseChatbot(ABC):
             return ""
         return "Ação executada."
 
+    def _resolve_content_response(
+        self,
+        tool_calls_executed: List[Dict[str, Any]],
+        content: str,
+    ) -> str:
+        extracted = self._extract_text_from_malformed_tool_call(content)
+        return self._resolve_tool_response(
+            tool_calls_executed,
+            content=extracted if extracted else content,
+        )
+
     def _build_tool_message(self, tool_name: str, tool_result: Dict[str, Any], 
                             tool_call_id: Optional[str] = None) -> Dict[str, Any]:
         message = {
@@ -732,7 +743,7 @@ class BaseChatbot(ABC):
                         params = json.loads(match.group(1).strip())
                         if isinstance(params, dict):
                             return tool_name, params
-                    except (json.JSONDecodeError, Exception):
+                    except json.JSONDecodeError:
                         continue
 
         return None
@@ -770,7 +781,7 @@ class BaseChatbot(ABC):
             if isinstance(tool_params, dict):
                 tool_params = _normalize_integer_ids(tool_name, tool_params, self._tool_mapping)
             return tool_name, tool_params if isinstance(tool_params, dict) else {}
-        except (json.JSONDecodeError, Exception) as e:
+        except json.JSONDecodeError as e:
             logger.warning(f"Failed to parse tool parameters for {tool_name}: {e}", exc_info=True)
             return None
 
@@ -894,10 +905,14 @@ class BaseChatbot(ABC):
                                 ),
                                 tool_calls_executed,
                             )
-                    if tool_calls_executed:
-                        action_reply = terminal_action_reply(tool_calls_executed)
-                        if action_reply:
-                            return action_reply, tool_calls_executed
+                    if tool_calls_executed and terminal_action_reply(tool_calls_executed):
+                        return (
+                            self._resolve_tool_response(
+                                tool_calls_executed,
+                                send_mensagem_executed=send_mensagem_executed,
+                            ),
+                            tool_calls_executed,
+                        )
                     break
                 
                 content_stripped = content.strip()
@@ -925,36 +940,16 @@ class BaseChatbot(ABC):
                     return " ".join(sent_message_texts), tool_calls_executed
                 
                 if finish_reason == "stop":
-                    if content_stripped:
-                        extracted = self._extract_text_from_malformed_tool_call(content_stripped)
-                        return (
-                            self._resolve_tool_response(
-                                tool_calls_executed,
-                                content=extracted if extracted else content_stripped,
-                            ),
-                            tool_calls_executed,
-                        )
-                    if send_mensagem_executed and sent_message_texts:
-                        return " ".join(sent_message_texts), tool_calls_executed
-                    if send_mensagem_executed or tool_calls_executed:
-                        return (
-                            self._resolve_tool_response(
-                                tool_calls_executed,
-                                send_mensagem_executed=send_mensagem_executed,
-                            ),
-                            tool_calls_executed,
-                        )
-                    return "Ação executada.", tool_calls_executed
-                
+                    return (
+                        self._resolve_content_response(tool_calls_executed, content_stripped),
+                        tool_calls_executed,
+                    )
+
                 if finish_reason == "length":
                     if content_stripped:
                         logger.warning("Response truncated due to length limit")
-                        extracted = self._extract_text_from_malformed_tool_call(content_stripped)
                         return (
-                            self._resolve_tool_response(
-                                tool_calls_executed,
-                                content=extracted if extracted else content_stripped,
-                            ),
+                            self._resolve_content_response(tool_calls_executed, content_stripped),
                             tool_calls_executed,
                         )
                     break
@@ -964,21 +959,16 @@ class BaseChatbot(ABC):
                     break
                 
                 if content_stripped:
-                    extracted = self._extract_text_from_malformed_tool_call(content_stripped)
                     return (
-                        self._resolve_tool_response(
-                            tool_calls_executed,
-                            content=extracted if extracted else content_stripped,
-                        ),
+                        self._resolve_content_response(tool_calls_executed, content_stripped),
                         tool_calls_executed,
                     )
                 break
-                
+
             except Exception as e:
                 logger.error(f"API request failed: {e}")
-                action_reply = terminal_action_reply(tool_calls_executed)
-                if action_reply:
-                    return action_reply, tool_calls_executed
+                if terminal_action_reply(tool_calls_executed):
+                    return self._resolve_tool_response(tool_calls_executed), tool_calls_executed
                 return "Deu ruim aqui do meu lado. Tenta de novo em instantes.", tool_calls_executed
         
         logger.warning(f"Exceeded maximum iterations ({max_iterations}) without completion")
