@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -77,14 +77,14 @@ def should_post_chatbot_reply(
 def resolve_chatbot_response(
     response: Any,
     tool_calls: Optional[list[dict[str, Any]]],
-    derive_action_reply: Optional[Callable[[list[dict[str, Any]]], Optional[str]]] = None,
+    chatbot: Any = None,
 ) -> str:
     if isinstance(response, str):
         stripped = response.strip()
         if stripped and stripped not in _SUPPRESSED_RESPONSES:
             return stripped
-    if derive_action_reply and tool_calls:
-        action_reply = derive_action_reply(tool_calls)
+    if chatbot and tool_calls:
+        action_reply = chatbot._derive_fallback_action_reply(tool_calls)
         if action_reply:
             return action_reply
     return ""

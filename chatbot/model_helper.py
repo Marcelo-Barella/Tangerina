@@ -459,11 +459,11 @@ class BaseChatbot(ABC):
         tool_calls_executed.append({"tool": "EnterChannel", "parameters": params, "result": result})
         logger.info(f"Auto EnterChannel after join request: {json.dumps(result, ensure_ascii=False)}")
 
-    def _derive_action_reply(
+    def _terminal_action_reply(
         self,
         tool_calls_executed: List[Dict[str, Any]],
         *,
-        for_fallback: bool = False,
+        skip_non_terminal: bool,
     ) -> Optional[str]:
         terminal_tools = {
             "EnterChannel": lambda r: f"Pronto, entrei no {r.get('channel_name') or 'canal de voz'}!",
@@ -479,13 +479,19 @@ class BaseChatbot(ABC):
             if not result.get("success"):
                 continue
             if tool in skip_override:
-                if for_fallback:
+                if skip_non_terminal:
                     continue
                 return None
             replier = terminal_tools.get(tool)
             if replier:
                 return replier(result)
         return None
+
+    def _derive_action_reply(self, tool_calls_executed: List[Dict[str, Any]]) -> Optional[str]:
+        return self._terminal_action_reply(tool_calls_executed, skip_non_terminal=False)
+
+    def _derive_fallback_action_reply(self, tool_calls_executed: List[Dict[str, Any]]) -> Optional[str]:
+        return self._terminal_action_reply(tool_calls_executed, skip_non_terminal=True)
 
     def _resolve_tool_response(
         self,

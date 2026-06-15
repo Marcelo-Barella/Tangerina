@@ -173,8 +173,9 @@ class TestResolveChatbotResponse:
         tool_calls = [
             {"tool": "EnterChannel", "result": {"success": True, "channel_name": "Geral"}},
         ]
-        derive = lambda tcs: f"Pronto, entrei no {tcs[0]['result']['channel_name']}!"
-        assert resolve_chatbot_response("", tool_calls, derive) == "Pronto, entrei no Geral!"
+        chatbot = MagicMock()
+        chatbot._derive_fallback_action_reply.return_value = "Pronto, entrei no Geral!"
+        assert resolve_chatbot_response("", tool_calls, chatbot) == "Pronto, entrei no Geral!"
 
     def test_empty_response_without_derive_stays_empty(self):
         assert resolve_chatbot_response("", [], None) == ""
@@ -183,8 +184,9 @@ class TestResolveChatbotResponse:
         tool_calls = [
             {"tool": "EnterChannel", "result": {"success": True, "channel_name": "Geral"}},
         ]
-        derive = lambda tcs: f"Pronto, entrei no {tcs[0]['result']['channel_name']}!"
-        assert resolve_chatbot_response("Ação executada.", tool_calls, derive) == "Pronto, entrei no Geral!"
+        chatbot = MagicMock()
+        chatbot._derive_fallback_action_reply.return_value = "Pronto, entrei no Geral!"
+        assert resolve_chatbot_response("Ação executada.", tool_calls, chatbot) == "Pronto, entrei no Geral!"
 
 
 @pytest.mark.unit
