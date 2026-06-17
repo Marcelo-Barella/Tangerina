@@ -55,6 +55,7 @@ except ImportError:
     create_omnivoice_client = None
 
 from features.music.music_bot import MusicBot, YTDLSource
+from features.voice.voice_recv_patches import apply_voice_recv_patches
 from features.music.music_service import MusicService, _resolve_voice_channel
 from features.tts.tts_handler import speak_tts_unified
 from flask_routes import create_flask_app
@@ -64,6 +65,7 @@ from features.discord.chatbot_reply import (
 )
 
 load_dotenv()
+apply_voice_recv_patches()
 
 logging.basicConfig(level=os.getenv('LOG_LEVEL', 'INFO'), format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -81,9 +83,11 @@ bot_loop: Optional[asyncio.AbstractEventLoop] = None
 
 music_bot = MusicBot(bot)
 music_bot.zhipu_api_key = os.getenv('ZHIPU_API_KEY')
-_openai_api_key = (os.getenv('OPENAI_API_KEY') or '').strip()
-music_bot.openai_api_key = _openai_api_key or None
-music_bot.whisper_provider = os.getenv('WHISPER_PROVIDER') or ('openai-api' if _openai_api_key else 'sidecar')
+openai_api_key = (os.getenv('OPENAI_API_KEY') or '').strip()
+music_bot.whisper_provider = os.getenv('WHISPER_PROVIDER') or (
+    'openai-api' if openai_api_key else 'sidecar'
+)
+music_bot.openai_api_key = openai_api_key or None
 
 spotify_client = None
 if SpotifyIntegration and (SPOTIFY_CLIENT_ID := os.getenv('SPOTIFY_CLIENT_ID')) and (SPOTIFY_CLIENT_SECRET := os.getenv('SPOTIFY_CLIENT_SECRET')):
@@ -118,7 +122,7 @@ if os.getenv('WEB_SEARCH_ENABLED', 'true').lower() == 'true' and (TAVILY_API_KEY
 
 MODEL_PROVIDER = os.getenv('MODEL_PROVIDER', 'zhipu')
 provider_map = {
-    'openai': (OpenAIChatbot, _openai_api_key or None),
+    'openai': (OpenAIChatbot, openai_api_key or None),
     'gemini': (GeminiChatbot, os.getenv('GEMINI_API_KEY')),
     'zhipu': (ZhipuChatbot, os.getenv('ZHIPU_API_KEY'))
 }

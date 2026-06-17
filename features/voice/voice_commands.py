@@ -15,29 +15,50 @@ import discord
 logger = logging.getLogger(__name__)
 
 MIN_AUDIO_CHUNKS = 10
+MIN_PCM_BYTES = MIN_AUDIO_CHUNKS * 3840
+MIN_SPEECH_RMS = 300
 QUEUE_DISPLAY_LIMIT = 5
 VOLUME_MIN = 0
 VOLUME_MAX = 100
 WAKE_WORD = 'tangerina'
+OPUS_SILENCE = b'\xf8\xff\xfe'
 LISTENING_DURATION = 5.0
 CANCEL_KEYWORDS = ['cancel', 'cancelar', 'stop', 'parar', 'nevermind', 'esquece']
 AUDIO_BUFFER_MAXLEN = 150
 AUDIO_SAMPLE_RATE = 48000
 AUDIO_SAMPLE_WIDTH = 2
 AUDIO_CHANNELS = 1
-TRANSCRIPTION_TIMEOUT = 30
 LISTENING_VOLUME = 20
 CONNECTION_HEALTH_CHECK_INTERVAL = 5.0
-CONNECTION_TIMEOUT = 10.0
+WHISPER_INITIAL_PROMPT = os.getenv(
+    'WHISPER_INITIAL_PROMPT',
+    (
+        'Transcreva em português brasileiro. Comandos de voz para o assistente musical Tangerina: '
+        'toca a música, para a música, pula a música, pausa a música, continua a música, '
+        'fila de música, volume, tangerina.'
+    ),
+)
 
 try:
     from discord.ext import voice_recv
     BaseSink = voice_recv.AudioSink
-    from discord.ext.voice_recv import OpusError
+    from features.voice.voice_recv_patches import apply_voice_recv_patches
+    apply_voice_recv_patches()
 except ImportError:
     voice_recv = None
     BaseSink = object
+
+try:
+    from discord.opus import OpusError
+except ImportError:
     OpusError = Exception
+
+from features.voice.openai_whisper_api import (
+    DEFAULT_WHISPER_LANGUAGE,
+    TRANSCRIPTION_TIMEOUT,
+    build_openai_whisper_client,
+    transcribe_openai_whisper,
+)
 
 try:
     import whisper
@@ -90,8 +111,9 @@ class VoiceCommandSink(BaseSink):
         self.last_audio_timestamps: Dict[int, float] = {}
         self._reconnection_task: Optional[asyncio.Task] = None
         self._reconnecting: bool = False
-        self._sink_created_time: float = time.time()
+        self._recovering_listener: bool = False
         self._health_monitor_started: bool = False
+        self._transcribe_lock = asyncio.Lock()
         self._validate_provider_config()
 
     def _validate_provider_config(self) -> None:
@@ -109,36 +131,51 @@ class VoiceCommandSink(BaseSink):
     def wants_opus(self) -> bool:
         return False
 
+    def _extract_pcm(self, data: Any) -> Optional[bytes]:
+        pcm = getattr(data, 'pcm', None)
+        return pcm if pcm else None
+
+    def _has_speech_energy(self, pcm_audio: bytes) -> bool:
+        try:
+            import audioop
+            return audioop.rms(pcm_audio, 2) >= MIN_SPEECH_RMS
+        except (ImportError, AttributeError):
+            return True
+
+    def _get_event_loop(self) -> Optional[asyncio.AbstractEventLoop]:
+        if hasattr(self, 'music_bot_ref') and self.music_bot_ref and getattr(self.music_bot_ref, 'main_loop', None):
+            return self.music_bot_ref.main_loop
+        return getattr(self.bot, 'loop', None)
+
+    def _schedule_listen_recovery(self) -> None:
+        loop = self._get_event_loop()
+        if loop and loop.is_running():
+            asyncio.run_coroutine_threadsafe(self._recover_listener(), loop)
+        else:
+            logger.error("No running event loop available to recover voice listener")
+
     def write(self, user: Optional[discord.Member], data: Any) -> None:
         if user is None:
             return
         if not self._health_monitor_started:
             self._start_health_monitor()
         try:
-            if hasattr(data, 'pcm') and data.pcm:
+            packet = getattr(data, 'packet', None)
+            if packet is not None and getattr(packet, 'decrypted_data', None) == OPUS_SILENCE:
+                return
+            pcm = self._extract_pcm(data)
+            if pcm:
                 if user.id not in self.audio_buffers:
                     self.audio_buffers[user.id] = deque(maxlen=AUDIO_BUFFER_MAXLEN)
-                self.audio_buffers[user.id].append(data.pcm)
+                self.audio_buffers[user.id].append(pcm)
                 self.last_audio_timestamps[user.id] = time.time()
         except OpusError as e:
             logger.error(f"OpusError in write() for user {user.id if user else None}: {e}")
-            loop = None
-            if hasattr(self, 'music_bot_ref') and self.music_bot_ref and hasattr(self.music_bot_ref, 'main_loop'):
-                loop = self.music_bot_ref.main_loop
-            if not loop:
-                loop = getattr(self.bot, 'loop', None)
-            if loop and loop.is_running():
-                asyncio.run_coroutine_threadsafe(self._trigger_reconnection(), loop)
+            self._schedule_listen_recovery()
         except Exception as e:
             logger.error(f"Error in write() for user {user.id if user else None}: {e}")
             if "corrupted stream" in str(e).lower() or "opus" in str(e).lower():
-                loop = None
-                if hasattr(self, 'music_bot_ref') and self.music_bot_ref and hasattr(self.music_bot_ref, 'main_loop'):
-                    loop = self.music_bot_ref.main_loop
-                if not loop:
-                    loop = getattr(self.bot, 'loop', None)
-                if loop and loop.is_running():
-                    asyncio.run_coroutine_threadsafe(self._trigger_reconnection(), loop)
+                self._schedule_listen_recovery()
 
     if voice_recv:
         @voice_recv.AudioSink.listener()
@@ -153,7 +190,7 @@ class VoiceCommandSink(BaseSink):
             if not hasattr(self, 'music_bot_ref'):
                 return
             music_bot = self.music_bot_ref
-            loop = music_bot.main_loop or getattr(self.bot, 'loop', None)
+            loop = self._get_event_loop()
             if loop and loop.is_running():
                 asyncio.run_coroutine_threadsafe(self.process_speech(member), loop)
             else:
@@ -166,9 +203,13 @@ class VoiceCommandSink(BaseSink):
         self.audio_buffers[member.id].clear()
         if len(audio_chunks) < MIN_AUDIO_CHUNKS:
             return
+        combined_pcm = b''.join(audio_chunks)
+        if len(combined_pcm) < MIN_PCM_BYTES or not self._has_speech_energy(combined_pcm):
+            return
         try:
             audio_data = self._combine_audio_chunks(audio_chunks)
-            text = await self._transcribe_audio(audio_data)
+            async with self._transcribe_lock:
+                text = await self._transcribe_audio(audio_data)
             if not text or not text.strip():
                 return
             logger.info(f"Transcribed from {member.display_name}: {text}")
@@ -240,6 +281,7 @@ class VoiceCommandSink(BaseSink):
         handler = provider_map.get(self.whisper_provider)
         if handler:
             return await handler(audio_data)
+        logger.warning("Unknown WHISPER_PROVIDER %r, falling back to zhipu", self.whisper_provider)
         return await self._transcribe_zhipu(audio_data)
 
     async def _transcribe_openai_api(self, audio_data: io.BytesIO) -> Optional[str]:
@@ -247,8 +289,7 @@ class VoiceCommandSink(BaseSink):
             logger.error("OPENAI_API_KEY not set for OpenAI Whisper API")
             return None
         try:
-            from openai import OpenAI
-            client = OpenAI(api_key=self.openai_api_key)
+            client = build_openai_whisper_client(self.openai_api_key, timeout=TRANSCRIPTION_TIMEOUT)
             audio_data.seek(0)
             audio_bytes = audio_data.read()
             tmp_file_path = None
@@ -257,14 +298,13 @@ class VoiceCommandSink(BaseSink):
                     tmp_file.write(audio_bytes)
                     tmp_file_path = tmp_file.name
                 with open(tmp_file_path, 'rb') as audio_file:
-                    result = await asyncio.to_thread(
-                        client.audio.transcriptions.create,
-                        model="whisper-1",
-                        file=audio_file,
-                        language="pt",
-                        prompt="Transcreva o áudio em português de forma clara, mantendo comandos e instruções conforme ouvidos. Você é o Tangerina, um assistente virtual de música brasileiro. Seus comandos são sempre relacionados a música, exemplo: toca a música 'Bohemian Rhapsody', para a música, pula a música, pausa a música, continua a música, etc."
+                    text = await asyncio.to_thread(
+                        transcribe_openai_whisper,
+                        client,
+                        audio_file,
+                        language=DEFAULT_WHISPER_LANGUAGE or None,
+                        prompt=WHISPER_INITIAL_PROMPT or None,
                     )
-                text = result.text.strip() if hasattr(result, 'text') else ''
                 return text if text else None
             finally:
                 self._cleanup_temp_file(tmp_file_path)
@@ -285,7 +325,12 @@ class VoiceCommandSink(BaseSink):
             with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_file:
                 tmp_file.write(audio_data.read())
                 tmp_file_path = tmp_file.name
-            result = await asyncio.to_thread(model.transcribe, tmp_file_path, language="pt")
+            result = await asyncio.to_thread(
+                model.transcribe,
+                tmp_file_path,
+                language="pt",
+                initial_prompt=WHISPER_INITIAL_PROMPT,
+            )
             text = result.get('text', '').strip()
             return text if text else None
         except Exception as e:
@@ -300,6 +345,7 @@ class VoiceCommandSink(BaseSink):
         url = f"{self.whisper_api_url.rstrip('/')}/transcribe"
         data = aiohttp.FormData()
         data.add_field('file', audio_bytes, filename='audio.wav', content_type='audio/wav')
+        data.add_field('prompt', WHISPER_INITIAL_PROMPT)
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, data=data, timeout=aiohttp.ClientTimeout(total=TRANSCRIPTION_TIMEOUT)) as response:
@@ -527,11 +573,7 @@ class VoiceCommandSink(BaseSink):
             self._health_monitor_started = True
             return
         self._health_monitor_started = True
-        loop = None
-        if hasattr(self, 'music_bot_ref') and self.music_bot_ref and hasattr(self.music_bot_ref, 'main_loop'):
-            loop = self.music_bot_ref.main_loop
-        if not loop:
-            loop = getattr(self.bot, 'loop', None)
+        loop = self._get_event_loop()
         if loop and loop.is_running():
             async def start_monitor():
                 try:
@@ -546,22 +588,50 @@ class VoiceCommandSink(BaseSink):
             except RuntimeError:
                 pass
 
+    def _listener_inactive(self) -> bool:
+        vc = self._voice_client
+        if not vc or not vc.is_connected():
+            return False
+        if hasattr(vc, 'is_listening') and not vc.is_listening():
+            return True
+        reader = getattr(vc, '_reader', None)
+        return bool(reader and getattr(reader, 'error', None))
+
+    async def _restart_listening(self) -> bool:
+        vc = self._voice_client
+        if not vc or not vc.is_connected() or not hasattr(vc, 'listen'):
+            return False
+        try:
+            vc.listen(self)
+            logger.info(f"Restarted voice listening for guild {self.guild_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to restart voice listening for guild {self.guild_id}: {e}")
+            return False
+
+    async def _recover_listener(self) -> None:
+        if self._reconnecting or self._recovering_listener:
+            return
+        self._recovering_listener = True
+        try:
+            if await self._restart_listening() and not self._listener_inactive():
+                return
+            await self._trigger_reconnection()
+        finally:
+            self._recovering_listener = False
+
     async def _check_connection_health(self) -> None:
         while True:
             try:
                 await asyncio.sleep(CONNECTION_HEALTH_CHECK_INTERVAL)
                 if not self._voice_client or not self._voice_client.is_connected():
                     continue
-                current_time = time.time()
-                if self.last_audio_timestamps:
-                    last_audio_time = max(self.last_audio_timestamps.values())
-                    time_since_last_audio = current_time - last_audio_time
-                    if time_since_last_audio > CONNECTION_TIMEOUT:
-                        logger.warning(f"No audio received for {time_since_last_audio:.1f}s, triggering reconnection")
-                        await self._trigger_reconnection()
-                elif current_time - getattr(self, '_sink_created_time', current_time) > CONNECTION_TIMEOUT:
-                    logger.warning(f"No audio received since sink creation, triggering reconnection")
-                    await self._trigger_reconnection()
+                if self._listener_inactive():
+                    logger.warning(
+                        "Voice listener inactive for guild %s, recovering",
+                        self.guild_id,
+                    )
+                    await self._recover_listener()
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -583,17 +653,17 @@ class VoiceCommandSink(BaseSink):
         if not self._voice_client:
             logger.error("Cannot reconnect: voice_client not available")
             return False
-        if not self._voice_client.channel:
+        channel = self._voice_client.channel
+        if not channel:
             logger.error("Cannot reconnect: voice channel not available")
             return False
         try:
-            channel = self._voice_client.channel
             guild_id = self.guild_id
             logger.info(f"Reconnecting voice client for guild {guild_id}")
             if self._voice_client.is_connected():
                 await self._voice_client.disconnect(force=True)
             await asyncio.sleep(1)
-            vc = await self.music_bot_ref.reconnect_voice_client(guild_id)
+            vc = await self.music_bot_ref.reconnect_voice_client(guild_id, channel=channel)
             if vc:
                 self._voice_client = vc
                 self.last_audio_timestamps.clear()
