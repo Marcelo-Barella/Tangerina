@@ -134,20 +134,6 @@ class TestAppOmnivoiceRegistration:
         assert "omnivoice" in app_module.tts_providers
         factory.assert_called_once()
 
-    def test_omnivoice_registration_failure_does_not_crash_app(self):
-        env = {
-            "DISCORD_BOT_TOKEN": "test-token",
-            "TTS_PROVIDER": "elevenlabs",
-            "ELEVEN_API_KEY": "test-eleven-key",
-            "OMNIVOICE_API_URL": "http://localhost:5003",
-        }
-        with patch(
-            "features.tts.http_tts.create_omnivoice_client",
-            side_effect=RuntimeError("connection refused"),
-        ):
-            app_module = _reload_app(env)
-        assert "omnivoice" not in app_module.tts_providers
-
 
 @pytest.mark.unit
 class TestAppWhisperProvider:

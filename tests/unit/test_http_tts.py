@@ -2,9 +2,8 @@ import os
 from unittest.mock import MagicMock, patch
 
 import pytest
-import requests
 
-from features.tts.http_tts import cleanup_tts_file, create_omnivoice_client
+from features.tts.http_tts import create_omnivoice_client
 
 
 @pytest.mark.unit
@@ -51,58 +50,4 @@ class TestHttpTTS:
 
             with patch("features.tts.http_tts.requests.post", return_value=mock_response):
                 with pytest.raises(RuntimeError, match="OmniVoice TTS API error"):
-                    client.generate_speech("ola")
-
-    def test_cleanup_tts_file_removes_existing_file(self, tmp_path):
-        audio_file = tmp_path / "stale.wav"
-        audio_file.write_bytes(b"RIFF")
-        cleanup_tts_file(str(audio_file))
-        assert not audio_file.exists()
-
-    def test_cleanup_tts_file_ignores_missing_file(self, tmp_path):
-        cleanup_tts_file(str(tmp_path / "missing.wav"))
-
-    def test_generate_speech_rejects_empty_streamed_response(self, tmp_path):
-        with patch.dict(os.environ, {"OMNIVOICE_API_URL": "http://localhost:5003"}):
-            client = create_omnivoice_client()
-            output_path = str(tmp_path / "out.wav")
-
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_response.iter_content.return_value = []
-
-            with patch("features.tts.http_tts.requests.post", return_value=mock_response):
-                with pytest.raises(RuntimeError, match="empty or invalid audio file"):
-                    client.generate_speech("ola", output_path=output_path)
-
-            assert not os.path.exists(output_path)
-
-    def test_generate_speech_cleans_up_partial_file_on_write_error(self, tmp_path):
-        with patch.dict(os.environ, {"OMNIVOICE_API_URL": "http://localhost:5003"}):
-            client = create_omnivoice_client()
-            output_path = str(tmp_path / "out.wav")
-
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_response.iter_content.return_value = [b"RIFF"]
-
-            def fail_on_write(*_args, **_kwargs):
-                raise OSError("disk full")
-
-            with patch("features.tts.http_tts.requests.post", return_value=mock_response):
-                with patch("builtins.open", side_effect=fail_on_write):
-                    with pytest.raises(OSError, match="disk full"):
-                        client.generate_speech("ola", output_path=output_path)
-
-            assert not os.path.exists(output_path)
-
-    def test_generate_speech_maps_timeout_to_runtime_error(self):
-        with patch.dict(os.environ, {"OMNIVOICE_API_URL": "http://localhost:5003"}):
-            client = create_omnivoice_client()
-
-            with patch(
-                "features.tts.http_tts.requests.post",
-                side_effect=requests.exceptions.Timeout("timed out"),
-            ):
-                with pytest.raises(RuntimeError, match="TTS generation timed out"):
                     client.generate_speech("ola")

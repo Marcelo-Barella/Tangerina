@@ -3,6 +3,7 @@ import logging
 import subprocess
 import tempfile
 import time
+from functools import partial
 from typing import Optional, Dict, Any
 import discord
 
@@ -281,7 +282,7 @@ async def speak_tts_unified(
             if resume_music and current_song:
                 await _resume_music_after_tts(guild_id, current_song, voice_client, music_bot, YTDLSource)
 
-        def after_play(error, resume_music: bool = False):
+        def after_play(_error, resume_music: bool = False):
             loop.call_soon_threadsafe(asyncio.create_task, cleanup_tts(resume_music))
 
         if use_mixing and music_source_info:
@@ -313,16 +314,16 @@ async def speak_tts_unified(
         
         voice_client.play(
             player,
-            after=lambda error: after_play(error, resume_music=mixing_music_stopped and was_playing),
+            after=partial(after_play, resume_music=mixing_music_stopped),
         )
         return {'success': True, 'message': f'Speaking with {provider_label}...'}
     except Exception as e:
         logger.error(f"Error playing TTS: {e}")
         if was_playing:
             _restore_music_volume(guild_id, original_volume, music_bot)
-            if mixing_music_stopped and current_song:
-                loop = music_bot.main_loop or asyncio.get_running_loop()
-                loop.create_task(_resume_music_after_tts(guild_id, current_song, voice_client, music_bot, YTDLSource))
-            elif voice_client.is_paused():
-                voice_client.resume()
+        if was_playing and mixing_music_stopped and current_song:
+            loop = music_bot.main_loop or asyncio.get_running_loop()
+            loop.create_task(_resume_music_after_tts(guild_id, current_song, voice_client, music_bot, YTDLSource))
+        elif was_playing and voice_client.is_paused():
+            voice_client.resume()
         return {'success': False, 'error': f'Failed to play TTS: {str(e)}'}
