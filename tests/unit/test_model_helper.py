@@ -337,6 +337,15 @@ class TestLoadTangerinaPersona:
         for tag in ("<context>", "<instructions>", "<examples>", "<formatting>"):
             assert tag in result
 
+    def test_load_tangerina_persona_falls_back_when_path_is_directory(self, tmp_path, monkeypatch):
+        persona_dir = tmp_path / "tangerina_persona.txt"
+        persona_dir.mkdir()
+        fake_module = tmp_path / "model_helper.py"
+        fake_module.touch()
+        monkeypatch.setattr("chatbot.model_helper.__file__", str(fake_module))
+        result = load_tangerina_persona()
+        assert result == DEFAULT_PERSONA_FALLBACK
+
     def test_default_persona_fallback_contains_tangerina(self):
         assert 'Tangerina' in DEFAULT_PERSONA_FALLBACK
 

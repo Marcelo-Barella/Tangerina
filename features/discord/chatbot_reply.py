@@ -1,8 +1,6 @@
 import logging
 from typing import Any, Callable, Optional
 
-import discord
-
 from chatbot.model_helper import SUPPRESSED_FALLBACK_RESPONSES
 
 logger = logging.getLogger(__name__)
@@ -67,9 +65,22 @@ def should_post_chatbot_reply(
         return False
     if normalized in SUPPRESSED_FALLBACK_RESPONSES:
         return False
+    sent_texts: list[str] = []
     for tc in tool_calls or []:
-        if tc.get("tool") == "SEND_Mensagem" and tc.get("result", {}).get("success") is True:
-            return False
+        if tc.get("tool") != "SEND_Mensagem":
+            continue
+        if tc.get("result", {}).get("success") is not True:
+            continue
+        text = tc.get("parameters", {}).get("text")
+        if not isinstance(text, str):
+            continue
+        stripped = text.strip()
+        if stripped:
+            sent_texts.append(stripped)
+    if sent_texts and normalized in sent_texts:
+        return False
+    if sent_texts and normalized == " ".join(sent_texts):
+        return False
     return True
 
 
@@ -107,9 +118,6 @@ async def post_chatbot_reply(
     for chunk in split_discord_message(text):
         try:
             await channel.send(chunk)
-        except discord.HTTPException as e:
-            logger.error(f"Discord HTTP error sending chatbot reply: {e}")
-            return
         except Exception as e:
             logger.error(f"Error sending chatbot reply: {e}")
             return
