@@ -206,7 +206,7 @@ Aguarde o health check em `http://localhost:5003/health` (primeira execução ba
 ```env
 TTS_PROVIDER=omnivoice
 OMNIVOICE_API_URL=http://omnivoice-tts:5003
-OMNIVOICE_INSTRUCT=female, brazilian accent
+OMNIVOICE_INSTRUCT=female, portuguese accent
 OMNIVOICE_PRECISION=int8
 OMNIVOICE_TIMEOUT=90
 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
@@ -215,7 +215,7 @@ PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 | Variável | Padrão | Descrição |
 |----------|--------|-----------|
 | `OMNIVOICE_API_URL` | — | URL do sidecar HTTP |
-| `OMNIVOICE_INSTRUCT` | `female, brazilian accent` | Voz fixa (voice design) |
+| `OMNIVOICE_INSTRUCT` | `female, portuguese accent` | Voz fixa (voice design) |
 | `OMNIVOICE_PRECISION` | `int8` | `int8` (6 GB VRAM), `int4` ou `fp16` (8 GB+) |
 | `OMNIVOICE_TIMEOUT` | `90` | Timeout das requisições TTS |
 
@@ -296,7 +296,7 @@ O modelo de IA decide automaticamente quais ferramentas usar baseado no contexto
 - `SPOTIFY_CLIENT_SECRET` - Client Secret do Spotify Developer App
 - `TTS_PROVIDER` - Provedor TTS: 'elevenlabs', 'piper' ou 'omnivoice' (padrão: elevenlabs)
 - `ELEVEN_API_KEY` - Chave da API ElevenLabs para TTS
-- `WHISPER_PROVIDER` - Provedor de transcrição de voz: 'zhipu' (GLM-ASR-2512) ou 'openai' (Whisper local) (padrão: zhipu)
+- `WHISPER_PROVIDER` - Provedor de transcrição: `zhipu`, `openai`, `openai-api`, `sidecar` (padrão: `openai-api` se `OPENAI_API_KEY` definida, senão `sidecar`)
 
 **Variáveis de Memória (ChromaDB):**
 - `MEMORY_ENABLED` - Habilita memória de longo prazo (padrão: false)
@@ -827,7 +827,7 @@ Todos os comandos de música funcionam por voz:
 
 #### Variáveis de Ambiente
 
-- `WHISPER_PROVIDER` (opcional) - Provedor de transcrição: 'zhipu' (GLM-ASR-2512) ou 'openai' (Whisper local) (padrão: zhipu)
+- `WHISPER_PROVIDER` (opcional) - Provedor de transcrição: `zhipu`, `openai`, `openai-api`, `sidecar` (padrão: `openai-api` se `OPENAI_API_KEY` definida, senão `sidecar`)
 - `ZHIPU_API_KEY` (opcional) - Chave da API ZhipuAI GLM para chatbot e transcrição (necessário se WHISPER_PROVIDER=zhipu)
 - `TTS_PROVIDER` (opcional) - Provedor TTS: 'elevenlabs', 'piper' ou 'omnivoice' (padrão: elevenlabs)
 - `ELEVEN_API_KEY` (opcional) - Chave da API ElevenLabs para TTS
