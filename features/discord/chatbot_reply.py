@@ -1,8 +1,6 @@
 import logging
 from typing import Any, Optional
 
-import discord
-
 logger = logging.getLogger(__name__)
 
 DISCORD_MESSAGE_LIMIT = 2000
