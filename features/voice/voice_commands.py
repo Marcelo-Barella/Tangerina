@@ -28,7 +28,6 @@ AUDIO_BUFFER_MAXLEN = 150
 AUDIO_SAMPLE_RATE = 48000
 AUDIO_SAMPLE_WIDTH = 2
 AUDIO_CHANNELS = 1
-TRANSCRIPTION_TIMEOUT = 30
 LISTENING_VOLUME = 20
 CONNECTION_HEALTH_CHECK_INTERVAL = 5.0
 WHISPER_INITIAL_PROMPT = os.getenv(
@@ -132,10 +131,6 @@ class VoiceCommandSink(BaseSink):
     def wants_opus(self) -> bool:
         return False
 
-    def _extract_pcm(self, data: Any) -> Optional[bytes]:
-        pcm = getattr(data, 'pcm', None)
-        return pcm if pcm else None
-
     def _has_speech_energy(self, pcm_audio: bytes) -> bool:
         try:
             import audioop
@@ -164,7 +159,7 @@ class VoiceCommandSink(BaseSink):
             packet = getattr(data, 'packet', None)
             if packet is not None and getattr(packet, 'decrypted_data', None) == OPUS_SILENCE:
                 return
-            pcm = self._extract_pcm(data)
+            pcm = getattr(data, 'pcm', None)
             if pcm:
                 if user.id not in self.audio_buffers:
                     self.audio_buffers[user.id] = deque(maxlen=AUDIO_BUFFER_MAXLEN)
@@ -280,9 +275,10 @@ class VoiceCommandSink(BaseSink):
             'zhipu': self._transcribe_zhipu,
         }
         handler = provider_map.get(self.whisper_provider)
-        if handler:
-            return await handler(audio_data)
-        return await self._transcribe_zhipu(audio_data)
+        if not handler:
+            logger.warning("Unknown whisper_provider %r", self.whisper_provider)
+            return None
+        return await handler(audio_data)
 
     async def _transcribe_openai_api(self, audio_data: io.BytesIO) -> Optional[str]:
         if not self.openai_api_key:
@@ -339,63 +335,68 @@ class VoiceCommandSink(BaseSink):
         finally:
             self._cleanup_temp_file(tmp_file_path)
 
-    async def _transcribe_sidecar(self, audio_data: io.BytesIO) -> Optional[str]:
-        audio_data.seek(0)
-        audio_bytes = audio_data.read()
-        url = f"{self.whisper_api_url.rstrip('/')}/transcribe"
-        data = aiohttp.FormData()
-        data.add_field('file', audio_bytes, filename='audio.wav', content_type='audio/wav')
-        data.add_field('prompt', WHISPER_INITIAL_PROMPT)
+    async def _post_multipart_transcription(
+        self,
+        url: str,
+        audio_bytes: bytes,
+        *,
+        headers: Optional[Dict[str, str]] = None,
+        fields: Optional[Dict[str, str]] = None,
+        error_label: str,
+    ) -> Optional[str]:
+        form = aiohttp.FormData()
+        for key, value in (fields or {}).items():
+            form.add_field(key, value)
+        form.add_field('file', audio_bytes, filename='audio.wav', content_type='audio/wav')
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.post(url, data=data, timeout=aiohttp.ClientTimeout(total=TRANSCRIPTION_TIMEOUT)) as response:
+                async with session.post(
+                    url,
+                    headers=headers,
+                    data=form,
+                    timeout=aiohttp.ClientTimeout(total=TRANSCRIPTION_TIMEOUT),
+                ) as response:
                     if response.status == 200:
-                        result = await response.json()
-                        text = result.get('text', '').strip()
-                        return text if text else None
+                        payload = await response.json()
+                        text = payload.get('text', '').strip()
+                        return text or None
                     error_text = await response.text()
-                    logger.error(f"Whisper sidecar transcription error: HTTP {response.status} - {error_text}")
+                    logger.error("%s transcription error: HTTP %s - %s", error_label, response.status, error_text)
                     return None
         except asyncio.TimeoutError:
-            logger.error("Whisper sidecar transcription timeout")
+            logger.error("%s transcription timeout", error_label)
             return None
-        except Exception as e:
-            logger.error(f"Whisper sidecar transcription error: {e}")
+        except Exception as exc:
+            logger.error("%s transcription error: %s", error_label, exc)
             return None
+
+    async def _transcribe_sidecar(self, audio_data: io.BytesIO) -> Optional[str]:
+        audio_data.seek(0)
+        url = f"{self.whisper_api_url.rstrip('/')}/transcribe"
+        return await self._post_multipart_transcription(
+            url,
+            audio_data.read(),
+            fields={'prompt': WHISPER_INITIAL_PROMPT},
+            error_label="Whisper sidecar",
+        )
 
     async def _transcribe_zhipu(self, audio_data: io.BytesIO) -> Optional[str]:
         if not self.zhipu_api_key:
             return None
         audio_data.seek(0)
-        audio_bytes = audio_data.read()
-        url = "https://api.z.ai/api/paas/v4/audio/transcriptions"
-        headers = {"Authorization": f"Bearer {self.zhipu_api_key}"}
-        data = aiohttp.FormData()
-        data.add_field('model', 'glm-asr-2512')
-        data.add_field('stream', 'false')
-        data.add_field('file', audio_bytes, filename='audio.wav', content_type='audio/wav')
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=headers, data=data, timeout=aiohttp.ClientTimeout(total=TRANSCRIPTION_TIMEOUT)) as response:
-                    if response.status == 200:
-                        result = await response.json()
-                        text = result.get('text', '')
-                        return text if text else None
-                    error_text = await response.text()
-                    logger.error(f"GLM-ASR-2512 transcription error: HTTP {response.status} - {error_text}")
-                    return None
-        except asyncio.TimeoutError:
-            logger.error("GLM-ASR-2512 transcription timeout")
-            return None
-        except Exception as e:
-            logger.error(f"GLM-ASR-2512 transcription error: {e}")
-            return None
+        return await self._post_multipart_transcription(
+            "https://api.z.ai/api/paas/v4/audio/transcriptions",
+            audio_data.read(),
+            headers={"Authorization": f"Bearer {self.zhipu_api_key}"},
+            fields={'model': 'glm-asr-2512', 'stream': 'false'},
+            error_label="GLM-ASR-2512",
+        )
 
     def _cleanup_temp_file(self, file_path: Optional[str]) -> None:
         if file_path:
             try:
                 os.unlink(file_path)
-            except Exception:
+            except OSError:
                 pass
 
     def _get_text_channel(self) -> Optional[discord.TextChannel]:
@@ -664,14 +665,13 @@ class VoiceCommandSink(BaseSink):
                 await self._voice_client.disconnect(force=True)
             await asyncio.sleep(1)
             vc = await self.music_bot_ref.reconnect_voice_client(guild_id, channel=channel)
-            if vc:
-                self._voice_client = vc
-                self.last_audio_timestamps.clear()
-                logger.info(f"Successfully reconnected voice client for guild {guild_id}")
-                return True
-            else:
+            if not vc:
                 logger.error(f"Failed to reconnect voice client for guild {guild_id}")
                 return False
+            self._voice_client = vc
+            self.last_audio_timestamps.clear()
+            logger.info(f"Successfully reconnected voice client for guild {guild_id}")
+            return True
         except Exception as e:
             logger.error(f"Error during reconnection: {e}")
             return False

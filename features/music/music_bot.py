@@ -29,6 +29,14 @@ FFMPEG_OPTIONS = {
 }
 
 
+def _load_voice_recv_module():
+    try:
+        from discord.ext import voice_recv as vr_module
+        return vr_module
+    except ImportError:
+        return None
+
+
 class YTDLSource(discord.PCMVolumeTransformer):
     def __init__(self, source, *, data, volume=0.5):
         super().__init__(source, volume)
@@ -162,11 +170,7 @@ class MusicBot:
 
     async def join_voice_channel(self, guild_id: int, channel_id: int, voice_recv_module=None) -> Optional[discord.VoiceClient]:
         if voice_recv_module is None:
-            try:
-                from discord.ext import voice_recv as vr_module
-                voice_recv_module = vr_module
-            except ImportError:
-                voice_recv_module = None
+            voice_recv_module = _load_voice_recv_module()
         self._check_nacl()
 
         if not self.bot.is_ready():
@@ -198,9 +202,8 @@ class MusicBot:
             return existing
 
         try:
-            result = await self._move_or_connect(guild_id, channel, voice_recv_module)
-            return result
-        except (discord.errors.ClientException, Exception) as e:
+            return await self._move_or_connect(guild_id, channel, voice_recv_module)
+        except Exception as e:
             if 'already connected' in str(e).lower():
                 return self._get_existing_voice_client(guild_id, channel_id)
             if 'pynacl' in str(e).lower() or 'nacl' in str(e).lower():
@@ -209,15 +212,11 @@ class MusicBot:
                 logger.warning(f'Gateway connection issue during voice connect, will retry: {e}')
                 await asyncio.sleep(1)
                 try:
-                    result = await self._move_or_connect(guild_id, channel, voice_recv_module)
-                    return result
+                    return await self._move_or_connect(guild_id, channel, voice_recv_module)
                 except Exception as retry_e:
                     logger.error(f'Voice connection retry failed: {retry_e}')
                     return None
             raise
-        except Exception as e:
-            logger.error(f'Error joining voice channel: {e}')
-            return None
 
     async def play_next(self, guild_id: int, spotify_client=None):
         if guild_id not in self.queues or not self.queues[guild_id]:
@@ -264,11 +263,7 @@ class MusicBot:
         channel=None,
     ) -> Optional[discord.VoiceClient]:
         if voice_recv_module is None:
-            try:
-                from discord.ext import voice_recv as vr_module
-                voice_recv_module = vr_module
-            except ImportError:
-                voice_recv_module = None
+            voice_recv_module = _load_voice_recv_module()
         if guild_id not in self.voice_sinks:
             logger.error(f"Cannot reconnect: no sink found for guild {guild_id}")
             return None

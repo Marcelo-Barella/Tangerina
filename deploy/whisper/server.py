@@ -96,7 +96,7 @@ def transcribe():
                     )
             else:
                 text_response = _transcribe_local(tmp_path, language_param, prompt)
-        logger.info(f"Transcribe response: {text_response}")
+        logger.info("Transcribe response length: %d chars", len(text_response))
         return jsonify({"text": text_response}), 200
     except Exception as exc:
         logger.error(f"Error transcribing audio: {exc}")
