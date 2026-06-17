@@ -60,7 +60,6 @@ pip install -r requirements.txt
 - `GEMINI_API_KEY`: Chave da API Google Gemini (obrigatório se MODEL_PROVIDER=gemini)
 
 **Variáveis Opcionais:**
-- `N8N_WEBHOOK_URL`: URL do webhook do n8n (opcional - para integração com n8n se desejado)
 - `LOG_LEVEL`: Nível de log (opcional, padrão: INFO)
 
 **Variáveis de Memória (ChromaDB):**
@@ -156,7 +155,7 @@ Independente do provedor escolhido, o chatbot oferece:
 - Processamento inteligente com acesso a 15 ferramentas
 - Decisão automática de ações baseada no contexto
 
-**Importante:** As respostas do chatbot não são enviadas automaticamente via Discord. Elas são disponibilizadas através de chamadas de ferramentas (tool calls) ou podem ser acessadas via webhook n8n se configurado.
+**Importante:** Em canais de texto, quando a mensagem aciona a Tangerina (menção, palavra-chave ou DM), o bot envia a resposta diretamente no mesmo canal quando o modelo retorna texto voltado ao usuário. Comandos que só executam ações (música, entrar em canal, etc.) permanecem silenciosos.
 
 ## Configuração do Piper TTS (Opcional)
 
@@ -279,43 +278,6 @@ O bot utiliza o provedor de IA configurado (ZhipuAI GLM, OpenAI GPT ou Google Ge
 
 O modelo de IA decide automaticamente quais ferramentas usar baseado no contexto da mensagem do usuário.
 
-## Integração com n8n (Opcional)
-
-Se `N8N_WEBHOOK_URL` estiver configurado, o bot também enviará dados de mensagens processadas para o webhook do n8n:
-
-```json
-{
-  "content": "Texto da mensagem",
-  "author": {
-    "id": "123456789",
-    "name": "nome_usuario",
-    "discriminator": "1234",
-    "bot": false
-  },
-  "channel": {
-    "id": "987654321",
-    "name": "nome_canal"
-  },
-  "guild": {
-    "id": "111222333",
-    "name": "Nome do Servidor"
-  },
-  "message_id": "444555666",
-  "timestamp": "2025-01-15T10:30:00Z",
-  "chatbot_response": "Resposta do modelo de IA",
-  "tool_calls": [
-    {
-      "tool": "MusicPlay",
-      "parameters": {...},
-      "result": {...}
-    }
-  ]
-}
-```
-
-**Nota sobre Respostas do Chatbot:**
-As respostas do chatbot não são enviadas automaticamente via Discord através da ferramenta `SEND_Mensagem`. Elas estão disponíveis no campo `chatbot_response` do payload enviado para o n8n e podem ser processadas através de tool calls. Para enviar respostas ao Discord via n8n, configure seu workflow para usar o campo `chatbot_response` ou processar as tool calls retornadas.
-
 ## Variáveis de Ambiente
 
 **Variáveis Obrigatórias:**
@@ -329,7 +291,6 @@ As respostas do chatbot não são enviadas automaticamente via Discord através 
 - `GEMINI_API_KEY` - Chave da API Google Gemini (obrigatório se MODEL_PROVIDER=gemini)
 
 **Variáveis Opcionais:**
-- `N8N_WEBHOOK_URL` - URL do webhook do n8n para integração adicional
 - `LOG_LEVEL` - Nível de log (padrão: INFO)
 - `SPOTIFY_CLIENT_ID` - Client ID do Spotify Developer App
 - `SPOTIFY_CLIENT_SECRET` - Client Secret do Spotify Developer App
@@ -362,7 +323,6 @@ As respostas do chatbot não são enviadas automaticamente via Discord através 
 - Verifique se a API key correspondente ao provedor está configurada (`ZHIPU_API_KEY`, `OPENAI_API_KEY` ou `GEMINI_API_KEY`)
 - Verifique os logs para erros
 - Verifique se o bot tem permissões para ler mensagens no canal
-- Se usando n8n, verifique se a URL do webhook está correta
 
 ### Bot não lê conteúdo das mensagens
 
@@ -956,10 +916,6 @@ O `docker-compose.yaml` define os seguintes serviços:
    - GPU NVIDIA opcional (INT8 padrão para 6 GB VRAM)
    - Health check: `/health`
 
-4. **n8n** - Serviço de automação (opcional, requer profile)
-   - Porta: 5678
-   - Acessível apenas quando o profile `n8n` for ativado
-
 ### Pré-requisitos
 
 1. Docker e Docker Compose instalados
@@ -975,14 +931,6 @@ O `docker-compose.yaml` define os seguintes serviços:
    cd deploy
    docker-compose up -d
    ```
-
-### Iniciar com n8n (opcional)
-
-Para iniciar os serviços incluindo o n8n:
-```bash
-cd deploy
-docker-compose --profile n8n up -d
-```
 
 ### Verificar Status
 
@@ -1017,7 +965,6 @@ Todas as variáveis de ambiente definidas no arquivo `.env` na raiz do projeto s
 - `logs/` - Diretório de logs (read-write)
 - `piper_models/` - Modelos Piper TTS (gerenciado pelo Docker)
 - `omnivoice_cache/` - Cache OmniVoice / HuggingFace (gerenciado pelo Docker)
-- `n8n_data/` - Dados do n8n (gerenciado pelo Docker)
 
 ### Rede
 
