@@ -216,6 +216,15 @@ class MusicBot:
                     return None
             raise
         except Exception as e:
+            if 'closing transport' in str(e).lower() or 'connection reset' in str(e).lower():
+                logger.warning(f'Gateway connection issue during voice connect, will retry: {e}')
+                await asyncio.sleep(1)
+                try:
+                    result = await self._move_or_connect(guild_id, channel, voice_recv_module)
+                    return result
+                except Exception as retry_e:
+                    logger.error(f'Voice connection retry failed: {retry_e}')
+                    return None
             logger.error(f'Error joining voice channel: {e}')
             return None
 
