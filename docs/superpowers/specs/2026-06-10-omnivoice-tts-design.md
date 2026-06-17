@@ -123,7 +123,7 @@ Returns 200 when model is loaded and ready; 503 during warmup.
   "device": "cuda:0",
   "precision": "int8",
   "model": "k2-fsa/OmniVoice",
-  "instruct": "female, brazilian accent",
+  "instruct": "female, portuguese accent",
   "vram_estimate_gb": 3.5
 }
 ```
@@ -163,7 +163,7 @@ Text is sanitized (emoji/control chars removed) using the same approach as `depl
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `OMNIVOICE_INSTRUCT` | `female, brazilian accent` | Fixed voice design string |
+| `OMNIVOICE_INSTRUCT` | `female, portuguese accent` | Fixed voice design string |
 | `OMNIVOICE_MODEL` | `k2-fsa/OmniVoice` | HuggingFace model ID |
 | `OMNIVOICE_PRECISION` | `int8` | `int8`, `int4`, or `fp16` |
 | `OMNIVOICE_DEVICE` | `auto` | `auto`, `cuda`, `cpu`, or `mps` |
@@ -222,7 +222,7 @@ omnivoice-tts:
   container_name: tangerina-omnivoice-tts
   restart: unless-stopped
   environment:
-    - OMNIVOICE_INSTRUCT=${OMNIVOICE_INSTRUCT:-female, brazilian accent}
+    - OMNIVOICE_INSTRUCT=${OMNIVOICE_INSTRUCT:-female, portuguese accent}
     - OMNIVOICE_DEVICE=auto
     - OMNIVOICE_PRECISION=${OMNIVOICE_PRECISION:-int8}
     - OMNIVOICE_MODEL=${OMNIVOICE_MODEL:-k2-fsa/OmniVoice}
@@ -339,7 +339,7 @@ Configure `.env`:
 ```env
 TTS_PROVIDER=omnivoice
 OMNIVOICE_API_URL=http://omnivoice-tts:5003
-OMNIVOICE_INSTRUCT=female, brazilian accent
+OMNIVOICE_INSTRUCT=female, portuguese accent
 ```
 
 Start bot:
@@ -364,7 +364,7 @@ curl -X POST http://localhost:5003/tts \
 ```env
 TTS_PROVIDER=omnivoice
 OMNIVOICE_API_URL=http://localhost:5003
-OMNIVOICE_INSTRUCT=female, brazilian accent
+OMNIVOICE_INSTRUCT=female, portuguese accent
 ```
 
 ## Testing

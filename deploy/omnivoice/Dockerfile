@@ -11,7 +11,7 @@ COPY omnivoice/requirements.txt /app/requirements.txt
 
 ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cu124
 RUN pip install --no-cache-dir \
-    torch==2.8.0 torchaudio==2.8.0 \
+    torch==2.6.0 torchaudio==2.6.0 \
     --index-url ${TORCH_INDEX_URL} \
     && pip install --no-cache-dir -r /app/requirements.txt
 
@@ -26,7 +26,7 @@ ENV OMNIVOICE_DEVICE=auto
 ENV OMNIVOICE_NUM_STEP=16
 ENV OMNIVOICE_SPEED=1.0
 ENV OMNIVOICE_LOAD_ASR=false
-ENV OMNIVOICE_INSTRUCT="female, brazilian accent"
+ENV OMNIVOICE_INSTRUCT="female, portuguese accent"
 ENV PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 ENV HF_HOME=/app/cache/huggingface
 
