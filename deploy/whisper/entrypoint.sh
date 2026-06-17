@@ -2,7 +2,7 @@
 set -e
 
 echo "Starting Whisper ASR sidecar..."
-echo "WHISPER_MODEL=${WHISPER_MODEL:-medium}"
+echo "WHISPER_MODEL=${WHISPER_MODEL:-base}"
 echo "WHISPER_LANGUAGE=${WHISPER_LANGUAGE:-pt}"
 echo "XDG_CACHE_HOME=${XDG_CACHE_HOME:-/app/.cache}"
 echo "WHISPER_PORT=${WHISPER_PORT:-5002}"
