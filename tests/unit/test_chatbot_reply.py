@@ -131,6 +131,12 @@ class TestShouldPostChatbotReply:
     def test_acao_executada_returns_none(self):
         assert should_post_chatbot_reply("Ação executada.", []) is None
 
+    def test_acao_executada_com_sucesso_returns_none(self):
+        assert should_post_chatbot_reply("Ação executada com sucesso!", []) is None
+
+    def test_entrei_no_canal_prefix_returns_none(self):
+        assert should_post_chatbot_reply("Entrei no canal Geral!", []) is None
+
     def test_conversational_text_returns_normalized(self):
         assert (
             should_post_chatbot_reply("Claro, posso te ajudar com isso!", [])
@@ -165,6 +171,35 @@ class TestShouldPostChatbotReply:
             "A capital da França é Paris e fica na Europa.",
             tool_calls,
         ) == "A capital da França é Paris e fica na Europa."
+
+    def test_cross_channel_send_does_not_suppress(self):
+        tool_calls = [
+            {
+                "tool": "SEND_Mensagem",
+                "parameters": {"channel_id": 999, "text": "Claro, posso te ajudar!"},
+                "result": {"success": True},
+            }
+        ]
+        assert should_post_chatbot_reply(
+            "Claro, posso te ajudar!",
+            tool_calls,
+            channel_id=111,
+        ) == "Claro, posso te ajudar!"
+
+    def test_joined_send_texts_suppresses_aggregate(self):
+        tool_calls = [
+            {
+                "tool": "SEND_Mensagem",
+                "parameters": {"text": "Primeiro."},
+                "result": {"success": True},
+            },
+            {
+                "tool": "SEND_Mensagem",
+                "parameters": {"text": "Segundo."},
+                "result": {"success": True},
+            },
+        ]
+        assert should_post_chatbot_reply("Primeiro. Segundo.", tool_calls) is None
 
     def test_successful_send_mensagem_without_text_does_not_suppress(self):
         tool_calls = [
@@ -266,35 +301,3 @@ class TestPostChatbotReply:
             await post_chatbot_reply(channel, "Olá!", [])
         channel.send.assert_awaited_once()
         mock_logger.error.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_successful_send_mensagem_suppresses_matching_send(self):
-        channel = AsyncMock()
-        tool_calls = [
-            {
-                "tool": "SEND_Mensagem",
-                "parameters": {"text": "Claro, posso te ajudar!"},
-                "result": {"success": True},
-            }
-        ]
-        await post_chatbot_reply(channel, "Claro, posso te ajudar!", tool_calls)
-        channel.send.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_successful_send_mensagem_posts_different_reply(self):
-        channel = AsyncMock()
-        tool_calls = [
-            {
-                "tool": "SEND_Mensagem",
-                "parameters": {"text": "Entendido!"},
-                "result": {"success": True},
-            }
-        ]
-        await post_chatbot_reply(
-            channel,
-            "A capital da França é Paris e fica na Europa.",
-            tool_calls,
-        )
-        channel.send.assert_awaited_once_with(
-            "A capital da França é Paris e fica na Europa."
-        )
