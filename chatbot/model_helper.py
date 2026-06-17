@@ -499,10 +499,7 @@ class BaseChatbot(ABC):
         send_mensagem_executed: bool = False,
     ) -> str:
         stripped_content = (content or "").strip() if content is not None else ""
-        for_fallback = content is None or not stripped_content or stripped_content in {
-            "Ação executada.",
-            "Ação executada com sucesso!",
-        }
+        for_fallback = content is None or not stripped_content or stripped_content == "Ação executada."
         action_reply = self._derive_action_reply(
             tool_calls_executed,
             for_fallback=for_fallback,
@@ -514,6 +511,21 @@ class BaseChatbot(ABC):
         if send_mensagem_executed:
             return ""
         return "Ação executada."
+
+    def _finish_tool_response(
+        self,
+        tool_calls_executed: List[Dict[str, Any]],
+        content: Optional[str] = None,
+        send_mensagem_executed: bool = False,
+    ) -> Tuple[str, List[Dict[str, Any]]]:
+        return (
+            self._resolve_tool_response(
+                tool_calls_executed,
+                content=content,
+                send_mensagem_executed=send_mensagem_executed,
+            ),
+            tool_calls_executed,
+        )
 
     def _build_tool_message(self, tool_name: str, tool_result: Dict[str, Any], 
                             tool_call_id: Optional[str] = None) -> Dict[str, Any]:
@@ -894,17 +906,12 @@ class BaseChatbot(ABC):
                         if send_mensagem_executed:
                             return "", tool_calls_executed
                         if tool_calls_executed:
-                            return (
-                                self._resolve_tool_response(
-                                    tool_calls_executed,
-                                    send_mensagem_executed=send_mensagem_executed,
-                                ),
+                            return self._finish_tool_response(
                                 tool_calls_executed,
+                                send_mensagem_executed=send_mensagem_executed,
                             )
                     if tool_calls_executed:
-                        action_reply = self._derive_action_reply(tool_calls_executed)
-                        if action_reply:
-                            return action_reply, tool_calls_executed
+                        return self._finish_tool_response(tool_calls_executed)
                     break
                 
                 content_stripped = content.strip()
@@ -920,22 +927,16 @@ class BaseChatbot(ABC):
                     await self._auto_enter_voice_if_needed(
                         message, tool_calls_executed, app_functions or {}, guild_id, user_id
                     )
-                    return (
-                        self._resolve_tool_response(
-                            tool_calls_executed,
-                            content=response_text,
-                            send_mensagem_executed=send_mensagem_executed,
-                        ),
+                    return self._finish_tool_response(
                         tool_calls_executed,
+                        content=response_text,
+                        send_mensagem_executed=send_mensagem_executed,
                     )
                 
                 if any(marker in content_stripped.lower() for marker in ["</tool_call>", "<arg_key>", "<arg_value>", "<tool_call>"]):
-                    return (
-                        self._resolve_tool_response(
-                            tool_calls_executed,
-                            send_mensagem_executed=send_mensagem_executed,
-                        ),
+                    return self._finish_tool_response(
                         tool_calls_executed,
+                        send_mensagem_executed=send_mensagem_executed,
                     )
                 
                 if send_mensagem_executed and content_stripped in sent_message_texts:
@@ -944,41 +945,29 @@ class BaseChatbot(ABC):
                 if finish_reason == "stop":
                     if content_stripped:
                         extracted = self._extract_text_from_malformed_tool_call(content_stripped)
-                        return (
-                            self._resolve_tool_response(
-                                tool_calls_executed,
-                                content=extracted if extracted else content_stripped,
-                            ),
+                        return self._finish_tool_response(
                             tool_calls_executed,
+                            content=extracted if extracted else content_stripped,
                         )
                     if send_mensagem_executed and sent_message_texts:
                         return " ".join(sent_message_texts), tool_calls_executed
                     if send_mensagem_executed or tool_calls_executed:
-                        return (
-                            self._resolve_tool_response(
-                                tool_calls_executed,
-                                send_mensagem_executed=send_mensagem_executed,
-                            ),
-                            tool_calls_executed,
-                        )
-                    return (
-                        self._resolve_tool_response(
+                        return self._finish_tool_response(
                             tool_calls_executed,
                             send_mensagem_executed=send_mensagem_executed,
-                        ),
+                        )
+                    return self._finish_tool_response(
                         tool_calls_executed,
+                        send_mensagem_executed=send_mensagem_executed,
                     )
                 
                 if finish_reason == "length":
                     if content_stripped:
                         logger.warning("Response truncated due to length limit")
                         extracted = self._extract_text_from_malformed_tool_call(content_stripped)
-                        return (
-                            self._resolve_tool_response(
-                                tool_calls_executed,
-                                content=extracted if extracted else content_stripped,
-                            ),
+                        return self._finish_tool_response(
                             tool_calls_executed,
+                            content=extracted if extracted else content_stripped,
                         )
                     break
                 
@@ -988,12 +977,9 @@ class BaseChatbot(ABC):
                 
                 if content_stripped:
                     extracted = self._extract_text_from_malformed_tool_call(content_stripped)
-                    return (
-                        self._resolve_tool_response(
-                            tool_calls_executed,
-                            content=extracted if extracted else content_stripped,
-                        ),
+                    return self._finish_tool_response(
                         tool_calls_executed,
+                        content=extracted if extracted else content_stripped,
                     )
                 break
                 
@@ -1006,10 +992,7 @@ class BaseChatbot(ABC):
         
         logger.warning(f"Exceeded maximum iterations ({max_iterations}) without completion")
         if tool_calls_executed:
-            action_reply = self._derive_action_reply(tool_calls_executed)
-            if action_reply:
-                return action_reply, tool_calls_executed
-            return self._resolve_tool_response(tool_calls_executed), tool_calls_executed
+            return self._finish_tool_response(tool_calls_executed)
         return "Tive um problema pra responder agora. Tenta de novo?", tool_calls_executed
 
     async def generate_response(self, message: str, context: Optional[List[Dict]] = None) -> str:

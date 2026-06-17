@@ -25,6 +25,7 @@ AUDIO_BUFFER_MAXLEN = 150
 AUDIO_SAMPLE_RATE = 48000
 AUDIO_SAMPLE_WIDTH = 2
 AUDIO_CHANNELS = 1
+TRANSCRIPTION_TIMEOUT = 30
 LISTENING_VOLUME = 20
 CONNECTION_HEALTH_CHECK_INTERVAL = 5.0
 CONNECTION_TIMEOUT = 10.0
@@ -33,6 +34,8 @@ try:
     from discord.ext import voice_recv
     BaseSink = voice_recv.AudioSink
     from discord.ext.voice_recv import OpusError
+    from features.voice.voice_recv_patches import apply_voice_recv_patches
+    apply_voice_recv_patches()
 except ImportError:
     voice_recv = None
     BaseSink = object
