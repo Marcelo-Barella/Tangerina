@@ -11,9 +11,9 @@ from chatbot.model_helper import (
     build_system_text,
     DEFAULT_PERSONA_FALLBACK,
     SYSTEM_PROMPT_TEMPLATE,
-    is_join_voice_request,
-    text_claims_voice_join,
 )
+from chatbot.voice_join import is_join_voice_request, text_claims_voice_join
+from chatbot.tool_response import resolve_tool_response
 
 @pytest.mark.unit
 class TestBuildToolsSchema:
@@ -514,7 +514,7 @@ class TestDeriveActionReply:
                 "result": {"success": True, "channel_name": "Geral"},
             }
         ]
-        final = test_chatbot._resolve_tool_response(
+        final = resolve_tool_response(
             tool_calls,
             content="Oi @Tangerina, você não está em um canal de voz.",
         )
@@ -532,7 +532,7 @@ class TestDeriveActionReply:
             },
         ]
         llm_text = "Adicionei 3 músicas na fila."
-        assert test_chatbot._resolve_tool_response(tool_calls, content=llm_text) == llm_text
+        assert resolve_tool_response(tool_calls, content=llm_text) == llm_text
 
     def test_music_play_fallback_uses_enter_channel_reply(self, test_chatbot):
         tool_calls = [
@@ -545,7 +545,7 @@ class TestDeriveActionReply:
                 "result": {"success": True, "message": "Now playing: song"},
             },
         ]
-        assert test_chatbot._resolve_tool_response(tool_calls) == "Pronto, entrei no Geral!"
+        assert resolve_tool_response(tool_calls) == "Pronto, entrei no Geral!"
 
     def test_failed_enter_channel_keeps_llm_text(self, test_chatbot):
         tool_calls = [
@@ -555,7 +555,7 @@ class TestDeriveActionReply:
             }
         ]
         llm_text = "Não consegui entrar no canal."
-        assert test_chatbot._resolve_tool_response(tool_calls, content=llm_text) == llm_text
+        assert resolve_tool_response(tool_calls, content=llm_text) == llm_text
 
     def test_empty_llm_text_uses_enter_channel_reply(self, test_chatbot):
         tool_calls = [
@@ -564,7 +564,7 @@ class TestDeriveActionReply:
                 "result": {"success": True, "channel_name": "Geral"},
             }
         ]
-        assert test_chatbot._resolve_tool_response(tool_calls) == "Pronto, entrei no Geral!"
+        assert resolve_tool_response(tool_calls) == "Pronto, entrei no Geral!"
 
     def test_leave_channel_overrides_llm_text(self, test_chatbot):
         tool_calls = [
@@ -573,7 +573,7 @@ class TestDeriveActionReply:
                 "result": {"success": True},
             }
         ]
-        assert test_chatbot._resolve_tool_response(tool_calls, content="Ainda estou no canal.") == "Saí do canal de voz."
+        assert resolve_tool_response(tool_calls, content="Ainda estou no canal.") == "Saí do canal de voz."
 
 
 @pytest.mark.unit
