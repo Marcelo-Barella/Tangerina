@@ -202,6 +202,13 @@ class TestResolveChatbotResponse:
     def test_empty_response_without_derive_stays_empty(self):
         assert resolve_chatbot_response("", [], None) == ""
 
+    def test_suppressed_fallback_uses_action_reply(self):
+        tool_calls = [
+            {"tool": "EnterChannel", "result": {"success": True, "channel_name": "Geral"}},
+        ]
+        derive = lambda tcs: f"Pronto, entrei no {tcs[0]['result']['channel_name']}!"
+        assert resolve_chatbot_response("Ação executada.", tool_calls, derive) == "Pronto, entrei no Geral!"
+
 
 @pytest.mark.unit
 class TestSplitDiscordMessage:

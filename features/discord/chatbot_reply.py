@@ -98,8 +98,10 @@ def resolve_chatbot_response(
     tool_calls: Optional[list[dict[str, Any]]],
     derive_action_reply: Optional[Callable[[list[dict[str, Any]]], Optional[str]]] = None,
 ) -> str:
-    if isinstance(response, str) and response.strip():
-        return response.strip()
+    if isinstance(response, str):
+        stripped = response.strip()
+        if stripped and stripped not in _SUPPRESSED_RESPONSES:
+            return stripped
     if derive_action_reply and tool_calls:
         action_reply = derive_action_reply(tool_calls)
         if action_reply:

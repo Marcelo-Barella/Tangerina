@@ -225,7 +225,11 @@ async def on_message(message: discord.Message) -> None:
                 message.content, [], guild_id, channel_id, user_id, music_functions, retrieved_memories
             )
 
-            response = resolve_chatbot_response(response, tool_calls, chatbot._derive_action_reply)
+            response = resolve_chatbot_response(
+                response,
+                tool_calls,
+                lambda tcs: chatbot._derive_action_reply(tcs, for_fallback=True),
+            )
 
             if chatbot.memory_manager:
                 await chatbot.memory_manager.store_conversation(message.content, response, guild_id, channel_id, user_id, tool_calls)
