@@ -42,7 +42,12 @@ def _bot_role_mentioned(message: Any) -> bool:
     mentioned_role_ids = {role.id for role in getattr(message, "role_mentions", [])}
     if not mentioned_role_ids:
         return False
-    return any(role.id in mentioned_role_ids for role in me.roles)
+    default_role = getattr(guild, "default_role", None)
+    default_role_id = getattr(default_role, "id", None)
+    return any(
+        role.id in mentioned_role_ids and role.id != default_role_id
+        for role in me.roles
+    )
 
 
 def should_respond_with_chatbot(message: Any, bot_user: Any = None) -> bool:
@@ -67,6 +72,8 @@ def should_post_chatbot_reply(
     if not normalized:
         return False
     if normalized in _SUPPRESSED_RESPONSES:
+        return False
+    if normalized.startswith("Entrei no canal "):
         return False
     sent_texts: list[str] = []
     for tc in tool_calls or []:
