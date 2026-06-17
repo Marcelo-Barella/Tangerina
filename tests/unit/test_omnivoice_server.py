@@ -48,6 +48,46 @@ class TestOmnivoiceServerHealth:
         assert response.status_code == 503
         assert response.get_json()["status"] == "loading"
 
+    def test_health_stays_loading_until_warmup_finishes(self):
+        server = _load_server_module()
+        server._model_state = None
+        server._model_ready = False
+        server._load_error = None
+        warmup_started = threading.Event()
+        release_warmup = threading.Event()
+
+        def fake_generate(**_kwargs):
+            warmup_started.set()
+            release_warmup.wait(timeout=2)
+
+        mock_model = MagicMock()
+        mock_model.generate.side_effect = fake_generate
+        fake_state = {
+            "model": mock_model,
+            "device": "cpu",
+            "precision": "int8",
+            "model_id": "test",
+            "vram_estimate_gb": 3.5,
+        }
+
+        with patch.object(server, "load_omnivoice_model", return_value=fake_state):
+            loader = threading.Thread(target=server._warmup_model, daemon=True)
+            loader.start()
+            assert warmup_started.wait(timeout=2)
+
+            with server.app.test_client() as client:
+                loading = client.get("/health")
+                assert loading.status_code == 503
+                assert loading.get_json()["status"] == "loading"
+
+            release_warmup.set()
+            loader.join(timeout=2)
+
+            with server.app.test_client() as client:
+                ready = client.get("/health")
+                assert ready.status_code == 200
+                assert ready.get_json()["status"] == "ok"
+
     def test_health_returns_503_when_model_failed_to_load(self, server):
         server._load_error = "CUDA unavailable"
         client = server.app.test_client()
