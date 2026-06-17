@@ -6,8 +6,8 @@ from features.tts.tts_handler import _play_tts_with_mixing
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 class TestTtsHandlerMixing:
+    @pytest.mark.asyncio
     async def test_mixed_after_play_passes_error_to_cleanup_callback(self):
         voice_client = MagicMock()
         music_bot = MagicMock()
