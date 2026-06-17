@@ -480,6 +480,7 @@ class BaseChatbot(ABC):
             })
             messages.append(self._build_tool_message("EnterChannel", result, tool_call_id))
 
+
     def _derive_action_reply(
         self,
         tool_calls_executed: List[Dict[str, Any]],
@@ -584,7 +585,10 @@ class BaseChatbot(ABC):
             return {"success": False, "error": f"Unknown tool: {tool_name}"}
         
         try:
-            return await handler(parameters, app_functions)
+            result = await handler(parameters, app_functions)
+            if tool_name in ("GET_UserVoiceChannel", "EnterChannel"):
+                logger.info(f"Tool result: {tool_name} -> {json.dumps(result, ensure_ascii=False)}")
+            return result
         except KeyError as e:
             return {"success": False, "error": f"Missing required parameter: {str(e)}"}
         except (ValueError, TypeError) as e:
