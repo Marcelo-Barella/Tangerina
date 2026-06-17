@@ -116,29 +116,35 @@ class TestShouldRespondWithChatbot:
 
 @pytest.mark.unit
 class TestShouldPostChatbotReply:
-    def test_empty_response_returns_false(self):
-        assert should_post_chatbot_reply("", []) is False
+    def test_empty_response_returns_none(self):
+        assert should_post_chatbot_reply("", []) is None
 
-    def test_whitespace_only_returns_false(self):
-        assert should_post_chatbot_reply("   \n\t  ", []) is False
+    def test_whitespace_only_returns_none(self):
+        assert should_post_chatbot_reply("   \n\t  ", []) is None
 
-    def test_none_response_returns_false(self):
-        assert should_post_chatbot_reply(None, []) is False
+    def test_none_response_returns_none(self):
+        assert should_post_chatbot_reply(None, []) is None
 
-    def test_non_string_response_returns_false(self):
-        assert should_post_chatbot_reply(123, []) is False
+    def test_non_string_response_returns_none(self):
+        assert should_post_chatbot_reply(123, []) is None
 
-    def test_acao_executada_returns_false(self):
-        assert should_post_chatbot_reply("Ação executada.", []) is False
+    def test_acao_executada_returns_none(self):
+        assert should_post_chatbot_reply("Ação executada.", []) is None
 
-    def test_acao_executada_com_sucesso_returns_false(self):
-        assert should_post_chatbot_reply("Ação executada com sucesso!", []) is False
+    def test_acao_executada_com_sucesso_returns_none(self):
+        assert should_post_chatbot_reply("Ação executada com sucesso!", []) is None
 
-    def test_conversational_text_returns_true(self):
-        assert should_post_chatbot_reply("Claro, posso te ajudar com isso!", []) is True
+    def test_conversational_text_returns_normalized(self):
+        assert (
+            should_post_chatbot_reply("Claro, posso te ajudar com isso!", [])
+            == "Claro, posso te ajudar com isso!"
+        )
 
-    def test_error_string_returns_true(self):
-        assert should_post_chatbot_reply("Erro ao executar ação: Channel not found", []) is True
+    def test_error_string_returns_normalized(self):
+        assert (
+            should_post_chatbot_reply("Erro ao executar ação: Channel not found", [])
+            == "Erro ao executar ação: Channel not found"
+        )
 
     def test_successful_send_mensagem_suppresses_matching_reply(self):
         tool_calls = [
@@ -148,7 +154,7 @@ class TestShouldPostChatbotReply:
                 "result": {"success": True},
             }
         ]
-        assert should_post_chatbot_reply("Claro, posso te ajudar!", tool_calls) is False
+        assert should_post_chatbot_reply("Claro, posso te ajudar!", tool_calls) is None
 
     def test_successful_send_mensagem_does_not_suppress_different_reply(self):
         tool_calls = [
@@ -158,13 +164,10 @@ class TestShouldPostChatbotReply:
                 "result": {"success": True},
             }
         ]
-        assert (
-            should_post_chatbot_reply(
-                "A capital da França é Paris e fica na Europa.",
-                tool_calls,
-            )
-            is True
-        )
+        assert should_post_chatbot_reply(
+            "A capital da França é Paris e fica na Europa.",
+            tool_calls,
+        ) == "A capital da França é Paris e fica na Europa."
 
     def test_successful_send_mensagem_without_text_does_not_suppress(self):
         tool_calls = [
@@ -173,7 +176,7 @@ class TestShouldPostChatbotReply:
                 "result": {"success": True},
             }
         ]
-        assert should_post_chatbot_reply("Claro, posso te ajudar!", tool_calls) is True
+        assert should_post_chatbot_reply("Claro, posso te ajudar!", tool_calls) == "Claro, posso te ajudar!"
 
     def test_failed_send_mensagem_does_not_suppress(self):
         tool_calls = [
@@ -182,10 +185,10 @@ class TestShouldPostChatbotReply:
                 "result": {"success": False},
             }
         ]
-        assert should_post_chatbot_reply("Falhou o envio", tool_calls) is True
+        assert should_post_chatbot_reply("Falhou o envio", tool_calls) == "Falhou o envio"
 
     def test_none_tool_calls_treated_as_empty_list(self):
-        assert should_post_chatbot_reply("Olá!", None) is True
+        assert should_post_chatbot_reply("Olá!", None) == "Olá!"
 
 
 @pytest.mark.unit

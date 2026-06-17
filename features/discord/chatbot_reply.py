@@ -65,16 +65,16 @@ def should_respond_with_chatbot(message: Any, bot_user: Any = None) -> bool:
 def should_post_chatbot_reply(
     response: Any,
     tool_calls: Optional[list[dict[str, Any]]],
-) -> bool:
+) -> Optional[str]:
     if not isinstance(response, str):
-        return False
+        return None
     normalized = response.strip()
     if not normalized:
-        return False
+        return None
     if normalized in _SUPPRESSED_RESPONSES:
-        return False
+        return None
     if normalized.startswith("Entrei no canal "):
-        return False
+        return None
     sent_texts: list[str] = []
     for tc in tool_calls or []:
         if tc.get("tool") != "SEND_Mensagem":
@@ -88,8 +88,8 @@ def should_post_chatbot_reply(
         if stripped:
             sent_texts.append(stripped)
     if sent_texts and normalized in sent_texts:
-        return False
-    return True
+        return None
+    return normalized
 
 
 async def post_chatbot_reply(
@@ -99,9 +99,9 @@ async def post_chatbot_reply(
 ) -> None:
     if channel is None:
         return
-    if not should_post_chatbot_reply(response, tool_calls):
+    text = should_post_chatbot_reply(response, tool_calls)
+    if text is None:
         return
-    text = response.strip()
     for chunk in split_discord_message(text):
         try:
             await channel.send(chunk)
