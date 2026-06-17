@@ -496,6 +496,11 @@ class BaseChatbot(ABC):
         skip_override = frozenset({
             "MusicPlay", "MusicSpotifyPlay", "SEND_Mensagem", "TTSSpeak",
         })
+        if for_fallback:
+            for tc in reversed(tool_calls_executed):
+                result = tc.get("result") or {}
+                if not result.get("success"):
+                    return f"Erro ao executar ação: {result.get('error', 'Erro desconhecido')}"
         for tc in reversed(tool_calls_executed):
             tool = tc.get("tool")
             result = tc.get("result") or {}
