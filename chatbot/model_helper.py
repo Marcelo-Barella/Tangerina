@@ -437,6 +437,7 @@ class BaseChatbot(ABC):
         app_functions: Dict[str, Any],
         guild_id: Optional[int],
         user_id: Optional[int],
+        messages: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
         if not is_join_voice_request(message):
             return
@@ -463,6 +464,21 @@ class BaseChatbot(ABC):
         )
         tool_calls_executed.append({"tool": "EnterChannel", "parameters": params, "result": result})
         logger.info(f"Auto EnterChannel after join request: {json.dumps(result, ensure_ascii=False)}")
+        if messages is not None:
+            tool_call_id = "auto_enter_channel"
+            messages.append({
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{
+                    "id": tool_call_id,
+                    "type": "function",
+                    "function": {
+                        "name": "EnterChannel",
+                        "arguments": json.dumps(params),
+                    },
+                }],
+            })
+            messages.append(self._build_tool_message("EnterChannel", result, tool_call_id))
 
     def _derive_action_reply(
         self,
@@ -881,7 +897,7 @@ class BaseChatbot(ABC):
                             messages.append(self._build_tool_message(tool_name, tool_result, tool_call_id))
 
                     await self._auto_enter_voice_if_needed(
-                        message, tool_calls_executed, app_functions or {}, guild_id, user_id
+                        message, tool_calls_executed, app_functions or {}, guild_id, user_id, messages
                     )
                     continue
                 
@@ -919,7 +935,7 @@ class BaseChatbot(ABC):
                     if msg_executed:
                         send_mensagem_executed = True
                     await self._auto_enter_voice_if_needed(
-                        message, tool_calls_executed, app_functions or {}, guild_id, user_id
+                        message, tool_calls_executed, app_functions or {}, guild_id, user_id, messages
                     )
                     return (
                         self._resolve_tool_response(
