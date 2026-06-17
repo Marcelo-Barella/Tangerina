@@ -17,7 +17,7 @@ services:
     ports:
       - "5000:5000"
     volumes:
-      - ../tangerina_persona.txt:/app/tangerina_persona.txt:ro
+      - ../tangerina_persona.txt:/app/chatbot/tangerina_persona.txt:ro
       - ../logs:/app/logs
       - ../.cursor:/app/.cursor
       - chromadb_data:/app/data/chromadb
