@@ -9,6 +9,7 @@ _SUPPRESSED_RESPONSES = frozenset({
     "Ação executada.",
     "Ação executada com sucesso!",
 })
+_SUPPRESSED_PREFIXES = ("Entrei no canal ",)
 
 
 def split_discord_message(text: str) -> list[str]:
@@ -62,13 +63,6 @@ def should_respond_with_chatbot(message: Any, bot_user: Any = None) -> bool:
     )
 
 
-def _channel_ids_match(left: Any, right: Any) -> bool:
-    try:
-        return int(left) == int(right)
-    except (TypeError, ValueError):
-        return False
-
-
 def should_post_chatbot_reply(
     response: Any,
     tool_calls: Optional[list[dict[str, Any]]],
@@ -81,7 +75,7 @@ def should_post_chatbot_reply(
         return None
     if normalized in _SUPPRESSED_RESPONSES:
         return None
-    if normalized.startswith("Entrei no canal "):
+    if any(normalized.startswith(prefix) for prefix in _SUPPRESSED_PREFIXES):
         return None
     sent_texts: list[str] = []
     for tc in tool_calls or []:
@@ -92,7 +86,10 @@ def should_post_chatbot_reply(
         params = tc.get("parameters", {})
         tc_channel_id = params.get("channel_id")
         if channel_id is not None and tc_channel_id is not None:
-            if not _channel_ids_match(tc_channel_id, channel_id):
+            try:
+                if int(tc_channel_id) != int(channel_id):
+                    continue
+            except (TypeError, ValueError):
                 continue
         text = params.get("text")
         if not isinstance(text, str):
