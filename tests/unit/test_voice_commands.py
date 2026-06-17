@@ -748,6 +748,9 @@ class TestVoiceCommandSinkHealthMonitoring:
     @pytest.mark.asyncio
     async def test_recover_listener_restarts_listen_before_reconnect(self, sink_instance):
         sink, _, mock_vc, _ = sink_instance
+        mock_vc.is_connected.return_value = True
+        mock_vc.is_listening.return_value = True
+        mock_vc._reader = None
         sink._restart_listening = AsyncMock(return_value=True)
         sink._trigger_reconnection = AsyncMock()
 

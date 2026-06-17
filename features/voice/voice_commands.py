@@ -614,7 +614,7 @@ class VoiceCommandSink(BaseSink):
             return
         self._recovering_listener = True
         try:
-            if await self._restart_listening():
+            if await self._restart_listening() and not self._listener_inactive():
                 return
             await self._trigger_reconnection()
         finally:
