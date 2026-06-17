@@ -82,8 +82,6 @@ def should_post_chatbot_reply(
             sent_texts.append(stripped)
     if sent_texts and normalized in sent_texts:
         return False
-    if sent_texts and normalized == " ".join(sent_texts):
-        return False
     return True
 
 
