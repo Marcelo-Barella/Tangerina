@@ -47,16 +47,19 @@ def _generation_kwargs(text: str) -> Dict[str, Any]:
 def _warmup_model() -> None:
     global _model_state, _model_ready, _load_error
     try:
-        _model_state = load_omnivoice_model()
-        model = _model_state["model"]
+        state = load_omnivoice_model()
+        model = state["model"]
         kwargs = _generation_kwargs("warmup")
         logger.info("Warming up OmniVoice with voice design instruct=%r", kwargs["instruct"])
         with _model_lock:
             model.generate(**kwargs)
+        _model_state = state
         _model_ready = True
         logger.info("OmniVoice warmup complete")
     except Exception as exc:
         _load_error = str(exc)
+        _model_state = None
+        _model_ready = False
         logger.exception("Failed to load OmniVoice model: %s", exc)
 
 
