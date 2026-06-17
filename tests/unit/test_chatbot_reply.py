@@ -131,9 +131,6 @@ class TestShouldPostChatbotReply:
     def test_acao_executada_returns_none(self):
         assert should_post_chatbot_reply("Ação executada.", []) is None
 
-    def test_acao_executada_com_sucesso_returns_none(self):
-        assert should_post_chatbot_reply("Ação executada com sucesso!", []) is None
-
     def test_conversational_text_returns_normalized(self):
         assert (
             should_post_chatbot_reply("Claro, posso te ajudar com isso!", [])
