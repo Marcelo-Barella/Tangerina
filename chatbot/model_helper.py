@@ -568,10 +568,7 @@ class BaseChatbot(ABC):
             return {"success": False, "error": f"Unknown tool: {tool_name}"}
         
         try:
-            result = await handler(parameters, app_functions)
-            if tool_name in ("GET_UserVoiceChannel", "EnterChannel"):
-                logger.info(f"Tool result: {tool_name} -> {json.dumps(result, ensure_ascii=False)}")
-            return result
+            return await handler(parameters, app_functions)
         except KeyError as e:
             return {"success": False, "error": f"Missing required parameter: {str(e)}"}
         except (ValueError, TypeError) as e:
@@ -903,9 +900,12 @@ class BaseChatbot(ABC):
                                 tool_calls_executed,
                             )
                     if tool_calls_executed:
-                        action_reply = self._derive_action_reply(tool_calls_executed)
-                        if action_reply:
-                            return action_reply, tool_calls_executed
+                        resolved = self._resolve_tool_response(
+                            tool_calls_executed,
+                            send_mensagem_executed=send_mensagem_executed,
+                        )
+                        if resolved != "Ação executada.":
+                            return resolved, tool_calls_executed
                     break
                 
                 content_stripped = content.strip()

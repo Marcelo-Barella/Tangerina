@@ -61,7 +61,6 @@ from features.tts.tts_handler import speak_tts_unified
 from flask_routes import create_flask_app
 from features.discord.chatbot_reply import (
     post_chatbot_reply,
-    resolve_chatbot_response,
     should_respond_with_chatbot,
 )
 
@@ -226,12 +225,6 @@ async def on_message(message: discord.Message) -> None:
 
             response, tool_calls = await chatbot.generate_response_with_tools(
                 message.content, [], guild_id, channel_id, user_id, music_functions, retrieved_memories
-            )
-
-            response = resolve_chatbot_response(
-                response,
-                tool_calls,
-                lambda tcs: chatbot._derive_action_reply(tcs, for_fallback=True),
             )
 
             if chatbot.memory_manager:
