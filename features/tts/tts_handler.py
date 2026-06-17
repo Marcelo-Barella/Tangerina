@@ -3,6 +3,7 @@ import logging
 import subprocess
 import tempfile
 import time
+from functools import partial
 from typing import Optional, Dict, Any
 import discord
 
@@ -313,7 +314,7 @@ async def speak_tts_unified(
         
         voice_client.play(
             player,
-            after=lambda error: after_play(error, resume_music=mixing_music_stopped and was_playing),
+            after=partial(after_play, resume_music=mixing_music_stopped and was_playing),
         )
         return {'success': True, 'message': f'Speaking with {provider_label}...'}
     except Exception as e:
