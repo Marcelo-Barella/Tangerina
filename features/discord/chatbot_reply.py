@@ -3,11 +3,11 @@ from typing import Any, Callable, Optional
 
 import discord
 
+from chatbot.model_helper import SUPPRESSED_FALLBACK_RESPONSES
+
 logger = logging.getLogger(__name__)
 
 DISCORD_MESSAGE_LIMIT = 2000
-
-_SUPPRESSED_RESPONSES = frozenset({"Ação executada."})
 
 
 def split_discord_message(text: str) -> list[str]:
@@ -65,7 +65,7 @@ def should_post_chatbot_reply(
     normalized = response.strip()
     if not normalized:
         return False
-    if normalized in _SUPPRESSED_RESPONSES:
+    if normalized in SUPPRESSED_FALLBACK_RESPONSES:
         return False
     for tc in tool_calls or []:
         if tc.get("tool") == "SEND_Mensagem" and tc.get("result", {}).get("success") is True:
@@ -76,14 +76,19 @@ def should_post_chatbot_reply(
 def resolve_chatbot_response(
     response: Any,
     tool_calls: Optional[list[dict[str, Any]]],
-    derive_action_reply: Optional[Callable[[list[dict[str, Any]]], Optional[str]]] = None,
+    derive_action_reply: Optional[Callable[..., Optional[str]]] = None,
+    *,
+    for_fallback: bool = False,
 ) -> str:
     if isinstance(response, str):
         stripped = response.strip()
-        if stripped and stripped not in _SUPPRESSED_RESPONSES:
+        if stripped and stripped not in SUPPRESSED_FALLBACK_RESPONSES:
             return stripped
     if derive_action_reply and tool_calls:
-        action_reply = derive_action_reply(tool_calls)
+        if for_fallback:
+            action_reply = derive_action_reply(tool_calls, for_fallback=True)
+        else:
+            action_reply = derive_action_reply(tool_calls)
         if action_reply:
             return action_reply
     return ""

@@ -7,6 +7,11 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+SUPPRESSED_FALLBACK_RESPONSES = frozenset({
+    "Ação executada.",
+    "Ação executada com sucesso!",
+})
+
 _JOIN_VOICE_REQUEST_RE = re.compile(
     r"(?:\b(?:entra|entre|entrar|join|conecta|conectar)\b).{0,40}(?:chamada|canal|voice|voz|call)"
     r"|(?:chamada|canal\s+de\s+voz).{0,20}\b(?:entra|entre|join)\b",
@@ -497,10 +502,11 @@ class BaseChatbot(ABC):
         send_mensagem_executed: bool = False,
     ) -> str:
         stripped_content = (content or "").strip() if content is not None else ""
-        for_fallback = content is None or not stripped_content or stripped_content in {
-            "Ação executada.",
-            "Ação executada com sucesso!",
-        }
+        for_fallback = (
+            content is None
+            or not stripped_content
+            or stripped_content in SUPPRESSED_FALLBACK_RESPONSES
+        )
         action_reply = self._derive_action_reply(
             tool_calls_executed,
             for_fallback=for_fallback,
@@ -1004,9 +1010,6 @@ class BaseChatbot(ABC):
         
         logger.warning(f"Exceeded maximum iterations ({max_iterations}) without completion")
         if tool_calls_executed:
-            action_reply = self._derive_action_reply(tool_calls_executed)
-            if action_reply:
-                return action_reply, tool_calls_executed
             return self._resolve_tool_response(tool_calls_executed), tool_calls_executed
         return "Tive um problema pra responder agora. Tenta de novo?", tool_calls_executed
 

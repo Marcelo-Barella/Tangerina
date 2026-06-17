@@ -228,7 +228,8 @@ async def on_message(message: discord.Message) -> None:
             response = resolve_chatbot_response(
                 response,
                 tool_calls,
-                lambda tcs: chatbot._derive_action_reply(tcs, for_fallback=True),
+                chatbot._derive_action_reply,
+                for_fallback=True,
             )
 
             if chatbot.memory_manager:
