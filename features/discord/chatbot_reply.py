@@ -1,14 +1,11 @@
 import logging
 from typing import Any, Optional
 
+from chatbot.model_helper import SUPPRESSED_ACTION_REPLIES
+
 logger = logging.getLogger(__name__)
 
 DISCORD_MESSAGE_LIMIT = 2000
-
-_SUPPRESSED_RESPONSES = frozenset({
-    "Ação executada.",
-    "Ação executada com sucesso!",
-})
 
 
 def split_discord_message(text: str) -> list[str]:
@@ -66,7 +63,7 @@ def should_post_chatbot_reply(
     normalized = response.strip()
     if not normalized:
         return False
-    if normalized in _SUPPRESSED_RESPONSES:
+    if normalized in SUPPRESSED_ACTION_REPLIES:
         return False
     sent_texts: list[str] = []
     for tc in tool_calls or []:

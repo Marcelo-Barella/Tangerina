@@ -6,18 +6,14 @@ logger = logging.getLogger(__name__)
 _patched = False
 
 
-def _decode_plc(decoder: Any) -> bytes | None:
-    try:
-        return decoder.decode(None, fec=False)
-    except Exception:
-        return None
-
-
 def _recover_opus_decode(decoder: Any, packet_data: bytes, exc: Exception, ssrc: Any) -> bytes:
     try:
         return decoder.decode(packet_data, fec=True)
     except Exception:
-        pcm = _decode_plc(decoder)
+        try:
+            pcm = decoder.decode(None, fec=False)
+        except Exception:
+            pcm = None
         if pcm:
             return pcm
         logger.warning("Opus decode failed for ssrc %s after FEC recovery", ssrc)

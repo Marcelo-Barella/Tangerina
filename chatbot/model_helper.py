@@ -7,6 +7,11 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+SUPPRESSED_ACTION_REPLIES = frozenset({
+    "Ação executada.",
+    "Ação executada com sucesso!",
+})
+
 _JOIN_VOICE_REQUEST_RE = re.compile(
     r"(?:\b(?:entra|entre|entrar|join|conecta|conectar)\b).{0,40}(?:chamada|canal|voice|voz|call)"
     r"|(?:chamada|canal\s+de\s+voz).{0,20}\b(?:entra|entre|join)\b",
@@ -499,10 +504,7 @@ class BaseChatbot(ABC):
         send_mensagem_executed: bool = False,
     ) -> str:
         stripped_content = (content or "").strip() if content is not None else ""
-        for_fallback = content is None or not stripped_content or stripped_content in {
-            "Ação executada.",
-            "Ação executada com sucesso!",
-        }
+        for_fallback = content is None or not stripped_content or stripped_content in SUPPRESSED_ACTION_REPLIES
         action_reply = self._derive_action_reply(
             tool_calls_executed,
             for_fallback=for_fallback,
@@ -567,10 +569,7 @@ class BaseChatbot(ABC):
             return {"success": False, "error": f"Unknown tool: {tool_name}"}
         
         try:
-            result = await handler(parameters, app_functions)
-            if tool_name in ("GET_UserVoiceChannel", "EnterChannel"):
-                logger.info(f"Tool result: {tool_name} -> {json.dumps(result, ensure_ascii=False)}")
-            return result
+            return await handler(parameters, app_functions)
         except KeyError as e:
             return {"success": False, "error": f"Missing required parameter: {str(e)}"}
         except (ValueError, TypeError) as e:
