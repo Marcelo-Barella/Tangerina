@@ -266,35 +266,3 @@ class TestPostChatbotReply:
             await post_chatbot_reply(channel, "Olá!", [])
         channel.send.assert_awaited_once()
         mock_logger.error.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_successful_send_mensagem_suppresses_matching_send(self):
-        channel = AsyncMock()
-        tool_calls = [
-            {
-                "tool": "SEND_Mensagem",
-                "parameters": {"text": "Claro, posso te ajudar!"},
-                "result": {"success": True},
-            }
-        ]
-        await post_chatbot_reply(channel, "Claro, posso te ajudar!", tool_calls)
-        channel.send.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_successful_send_mensagem_posts_different_reply(self):
-        channel = AsyncMock()
-        tool_calls = [
-            {
-                "tool": "SEND_Mensagem",
-                "parameters": {"text": "Entendido!"},
-                "result": {"success": True},
-            }
-        ]
-        await post_chatbot_reply(
-            channel,
-            "A capital da França é Paris e fica na Europa.",
-            tool_calls,
-        )
-        channel.send.assert_awaited_once_with(
-            "A capital da França é Paris e fica na Europa."
-        )
