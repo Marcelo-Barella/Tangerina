@@ -28,7 +28,6 @@ AUDIO_BUFFER_MAXLEN = 150
 AUDIO_SAMPLE_RATE = 48000
 AUDIO_SAMPLE_WIDTH = 2
 AUDIO_CHANNELS = 1
-TRANSCRIPTION_TIMEOUT = 30
 LISTENING_VOLUME = 20
 CONNECTION_HEALTH_CHECK_INTERVAL = 5.0
 WHISPER_INITIAL_PROMPT = os.getenv(
@@ -132,10 +131,6 @@ class VoiceCommandSink(BaseSink):
     def wants_opus(self) -> bool:
         return False
 
-    def _extract_pcm(self, data: Any) -> Optional[bytes]:
-        pcm = getattr(data, 'pcm', None)
-        return pcm if pcm else None
-
     def _has_speech_energy(self, pcm_audio: bytes) -> bool:
         try:
             import audioop
@@ -164,7 +159,7 @@ class VoiceCommandSink(BaseSink):
             packet = getattr(data, 'packet', None)
             if packet is not None and getattr(packet, 'decrypted_data', None) == OPUS_SILENCE:
                 return
-            pcm = self._extract_pcm(data)
+            pcm = getattr(data, 'pcm', None)
             if pcm:
                 if user.id not in self.audio_buffers:
                     self.audio_buffers[user.id] = deque(maxlen=AUDIO_BUFFER_MAXLEN)
@@ -664,14 +659,13 @@ class VoiceCommandSink(BaseSink):
                 await self._voice_client.disconnect(force=True)
             await asyncio.sleep(1)
             vc = await self.music_bot_ref.reconnect_voice_client(guild_id, channel=channel)
-            if vc:
-                self._voice_client = vc
-                self.last_audio_timestamps.clear()
-                logger.info(f"Successfully reconnected voice client for guild {guild_id}")
-                return True
-            else:
+            if not vc:
                 logger.error(f"Failed to reconnect voice client for guild {guild_id}")
                 return False
+            self._voice_client = vc
+            self.last_audio_timestamps.clear()
+            logger.info(f"Successfully reconnected voice client for guild {guild_id}")
+            return True
         except Exception as e:
             logger.error(f"Error during reconnection: {e}")
             return False

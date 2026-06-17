@@ -198,13 +198,6 @@ async def on_message(message: discord.Message) -> None:
         return
 
     will_respond = bool(chatbot and should_respond_with_chatbot(message, bot.user))
-    logger.info(
-        "Discord message received ch=%s user=%s respond=%s preview=%r",
-        message.channel.id,
-        message.author.id,
-        will_respond,
-        (message.content or "")[:80],
-    )
 
     await bot.process_commands(message)
 

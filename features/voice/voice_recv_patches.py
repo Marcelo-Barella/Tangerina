@@ -24,28 +24,34 @@ def apply_voice_recv_patches() -> None:
 
     def _decode_packet_resilient(self: Any, packet: Any) -> Tuple[Any, bytes]:
         assert self._decoder is not None
-        if packet:
-            try:
-                pcm = self._decoder.decode(packet.decrypted_data, fec=False)
-                return packet, pcm
-            except OpusError as exc:
-                try:
-                    pcm = self._decoder.decode(packet.decrypted_data, fec=True)
-                    return packet, pcm
-                except OpusError:
-                    try:
-                        pcm = self._decoder.decode(None, fec=False)
-                        if pcm:
-                            return packet, pcm
-                    except OpusError:
-                        pass
-                    logger.warning(
-                        "Opus decode failed for ssrc %s after FEC recovery",
-                        getattr(self, 'ssrc', '?'),
-                    )
-                    raise exc
+        if not packet:
+            return original_decode(self, packet)
 
-        return original_decode(self, packet)
+        first_error = None
+        try:
+            pcm = self._decoder.decode(packet.decrypted_data, fec=False)
+            return packet, pcm
+        except OpusError as exc:
+            first_error = exc
+
+        try:
+            pcm = self._decoder.decode(packet.decrypted_data, fec=True)
+            return packet, pcm
+        except OpusError:
+            pass
+
+        try:
+            pcm = self._decoder.decode(None, fec=False)
+            if pcm:
+                return packet, pcm
+        except OpusError:
+            pass
+
+        logger.warning(
+            "Opus decode failed for ssrc %s after FEC recovery",
+            getattr(self, 'ssrc', '?'),
+        )
+        raise first_error
 
     _decode_packet_resilient._tangerina_patched = True  # type: ignore[attr-defined]
     vr_opus.PacketDecoder._decode_packet = _decode_packet_resilient
