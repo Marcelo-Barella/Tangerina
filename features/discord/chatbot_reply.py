@@ -62,9 +62,17 @@ def should_respond_with_chatbot(message: Any, bot_user: Any = None) -> bool:
     )
 
 
+def _channel_ids_match(left: Any, right: Any) -> bool:
+    try:
+        return int(left) == int(right)
+    except (TypeError, ValueError):
+        return False
+
+
 def should_post_chatbot_reply(
     response: Any,
     tool_calls: Optional[list[dict[str, Any]]],
+    channel_id: Optional[int] = None,
 ) -> Optional[str]:
     if not isinstance(response, str):
         return None
@@ -81,14 +89,22 @@ def should_post_chatbot_reply(
             continue
         if tc.get("result", {}).get("success") is not True:
             continue
-        text = tc.get("parameters", {}).get("text")
+        params = tc.get("parameters", {})
+        tc_channel_id = params.get("channel_id")
+        if channel_id is not None and tc_channel_id is not None:
+            if not _channel_ids_match(tc_channel_id, channel_id):
+                continue
+        text = params.get("text")
         if not isinstance(text, str):
             continue
         stripped = text.strip()
         if stripped:
             sent_texts.append(stripped)
-    if sent_texts and normalized in sent_texts:
-        return None
+    if sent_texts:
+        if normalized in sent_texts:
+            return None
+        if normalized == " ".join(sent_texts):
+            return None
     return normalized
 
 
@@ -99,7 +115,8 @@ async def post_chatbot_reply(
 ) -> None:
     if channel is None:
         return
-    text = should_post_chatbot_reply(response, tool_calls)
+    channel_id = getattr(channel, "id", None)
+    text = should_post_chatbot_reply(response, tool_calls, channel_id)
     if text is None:
         return
     for chunk in split_discord_message(text):
