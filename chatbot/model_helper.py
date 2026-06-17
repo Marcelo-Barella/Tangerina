@@ -470,10 +470,11 @@ class BaseChatbot(ABC):
         *,
         for_fallback: bool = False,
     ) -> Optional[str]:
+        leave_reply = "Saí do canal de voz."
         terminal_tools = {
             "EnterChannel": lambda r: f"Pronto, entrei no {r.get('channel_name') or 'canal de voz'}!",
-            "LeaveChannel": lambda _: "Saí do canal de voz.",
-            "MusicLeave": lambda _: "Saí do canal de voz.",
+            "LeaveChannel": lambda _: leave_reply,
+            "MusicLeave": lambda _: leave_reply,
         }
         skip_override = frozenset({
             "MusicPlay", "MusicSpotifyPlay", "SEND_Mensagem", "TTSSpeak",
@@ -953,14 +954,6 @@ class BaseChatbot(ABC):
                         )
                     if send_mensagem_executed and sent_message_texts:
                         return " ".join(sent_message_texts), tool_calls_executed
-                    if send_mensagem_executed or tool_calls_executed:
-                        return (
-                            self._resolve_tool_response(
-                                tool_calls_executed,
-                                send_mensagem_executed=send_mensagem_executed,
-                            ),
-                            tool_calls_executed,
-                        )
                     return (
                         self._resolve_tool_response(
                             tool_calls_executed,
