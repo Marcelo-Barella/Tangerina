@@ -115,6 +115,7 @@ class VoiceCommandSink(BaseSink):
         self._recovering_listener: bool = False
         self._health_monitor_started: bool = False
         self._transcribe_lock = asyncio.Lock()
+        self._openai_whisper_client = None
         self._validate_provider_config()
 
     def _validate_provider_config(self) -> None:
@@ -285,30 +286,28 @@ class VoiceCommandSink(BaseSink):
         logger.warning("Unknown WHISPER_PROVIDER %r, falling back to zhipu", self.whisper_provider)
         return await self._transcribe_zhipu(audio_data)
 
+    def _get_openai_whisper_client(self):
+        if self._openai_whisper_client is None:
+            self._openai_whisper_client = build_openai_whisper_client(
+                self.openai_api_key,
+                timeout=TRANSCRIPTION_TIMEOUT,
+            )
+        return self._openai_whisper_client
+
     async def _transcribe_openai_api(self, audio_data: io.BytesIO) -> Optional[str]:
         if not self.openai_api_key:
             logger.error("OPENAI_API_KEY not set for OpenAI Whisper API")
             return None
         try:
-            client = build_openai_whisper_client(self.openai_api_key, timeout=TRANSCRIPTION_TIMEOUT)
             audio_data.seek(0)
-            audio_bytes = audio_data.read()
-            tmp_file_path = None
-            try:
-                with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_file:
-                    tmp_file.write(audio_bytes)
-                    tmp_file_path = tmp_file.name
-                with open(tmp_file_path, 'rb') as audio_file:
-                    text = await asyncio.to_thread(
-                        transcribe_openai_whisper,
-                        client,
-                        audio_file,
-                        language=DEFAULT_WHISPER_LANGUAGE or None,
-                        prompt=WHISPER_INITIAL_PROMPT or None,
-                    )
-                return text if text else None
-            finally:
-                self._cleanup_temp_file(tmp_file_path)
+            text = await asyncio.to_thread(
+                transcribe_openai_whisper,
+                self._get_openai_whisper_client(),
+                audio_data,
+                language=DEFAULT_WHISPER_LANGUAGE or None,
+                prompt=WHISPER_INITIAL_PROMPT or None,
+            )
+            return text if text else None
         except Exception as e:
             logger.error(f"OpenAI Whisper API transcription error: {e}")
             return None
@@ -329,7 +328,7 @@ class VoiceCommandSink(BaseSink):
             result = await asyncio.to_thread(
                 model.transcribe,
                 tmp_file_path,
-                language="pt",
+                language=DEFAULT_WHISPER_LANGUAGE or None,
                 initial_prompt=WHISPER_INITIAL_PROMPT,
             )
             text = result.get('text', '').strip()
