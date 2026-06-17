@@ -32,10 +32,6 @@ _local_model = None
 _transcribe_lock = threading.Lock()
 
 
-def _use_openai_api() -> bool:
-    return bool(OPENAI_API_KEY)
-
-
 def _get_openai_client():
     global _openai_client
     if _openai_client is None:
@@ -58,13 +54,26 @@ def _transcribe_local(tmp_path: str, language: str | None, prompt: str) -> str:
         transcribe_kwargs["language"] = language
     if prompt:
         transcribe_kwargs["initial_prompt"] = prompt
-    result = _load_local_model().transcribe(tmp_path, **transcribe_kwargs)
-    return result.get("text", "").strip()
+    transcription = _load_local_model().transcribe(tmp_path, **transcribe_kwargs)
+    return transcription.get("text", "").strip()
+
+
+def _transcribe_uploaded_file(tmp_path: str, language: str | None, prompt: str) -> str:
+    with _transcribe_lock:
+        if OPENAI_API_KEY:
+            with open(tmp_path, "rb") as audio_file:
+                return transcribe_openai_whisper(
+                    _get_openai_client(),
+                    audio_file,
+                    language=language,
+                    prompt=prompt or None,
+                )
+        return _transcribe_local(tmp_path, language, prompt)
 
 
 @app.route("/health", methods=["GET"])
 def health():
-    if _use_openai_api():
+    if OPENAI_API_KEY:
         return jsonify({"status": "ok", "provider": "openai-api"}), 200
     if whisper is None:
         return jsonify({"status": "error", "error": "No transcription backend available"}), 503
@@ -85,18 +94,8 @@ def transcribe():
 
         language_param = WHISPER_LANGUAGE if WHISPER_LANGUAGE else None
         prompt = (request.form.get("prompt") or WHISPER_INITIAL_PROMPT or "").strip()
-        with _transcribe_lock:
-            if _use_openai_api():
-                with open(tmp_path, "rb") as audio_file:
-                    text_response = transcribe_openai_whisper(
-                        _get_openai_client(),
-                        audio_file,
-                        language=language_param,
-                        prompt=prompt or None,
-                    )
-            else:
-                text_response = _transcribe_local(tmp_path, language_param, prompt)
-        logger.info(f"Transcribe response: {text_response}")
+        text_response = _transcribe_uploaded_file(tmp_path, language_param, prompt)
+        logger.info("Transcribe response length: %d chars", len(text_response))
         return jsonify({"text": text_response}), 200
     except Exception as exc:
         logger.error(f"Error transcribing audio: {exc}")
@@ -110,7 +109,7 @@ def transcribe():
 
 
 if __name__ == "__main__":
-    if _use_openai_api():
+    if OPENAI_API_KEY:
         logger.info("Whisper sidecar using OpenAI Whisper API (whisper-1)")
     else:
         logger.warning(

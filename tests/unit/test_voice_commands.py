@@ -612,12 +612,9 @@ class TestVoiceCommandSinkTranscriptionProviders:
         import io
         audio_data = io.BytesIO(b'RIFF')
 
-        with patch('features.voice.voice_commands.build_openai_whisper_client', return_value=MagicMock()):
-            with patch(
-                'features.voice.voice_commands.transcribe_openai_whisper',
-                return_value='toca música',
-            ):
-                result = await sink._transcribe_openai_api(audio_data)
+        with patch('features.voice.voice_commands.transcribe_openai_whisper', return_value='toca música'):
+            sink._openai_whisper_client = MagicMock()
+            result = await sink._transcribe_openai_api(audio_data)
 
         assert result == 'toca música'
 
