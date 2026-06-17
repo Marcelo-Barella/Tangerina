@@ -17,6 +17,7 @@ _JOIN_VOICE_VERB_RE = re.compile(
     re.IGNORECASE,
 )
 _JOIN_VOICE_NEGATION_RE = re.compile(r"\b(não|nao|nunca|jamais|sem)\s*$", re.IGNORECASE)
+_JOIN_VOICE_HOW_TO_RE = re.compile(r"\bcomo\s+entrar\b", re.IGNORECASE)
 _JOIN_VOICE_CLAIM_RE = re.compile(
     r"\b(entrei|entrou|joining|joined|conectei|conectado)\b.{0,40}\b(chamada|canal|voice|voz|call)\b",
     re.IGNORECASE,
@@ -25,6 +26,10 @@ _JOIN_VOICE_CLAIM_RE = re.compile(
 
 def is_join_voice_request(message: str) -> bool:
     text = message.strip()
+    if not text:
+        return False
+    if _JOIN_VOICE_HOW_TO_RE.search(text):
+        return False
     match = _JOIN_VOICE_REQUEST_RE.search(text)
     if not match:
         return False
@@ -459,7 +464,12 @@ class BaseChatbot(ABC):
         tool_calls_executed.append({"tool": "EnterChannel", "parameters": params, "result": result})
         logger.info(f"Auto EnterChannel after join request: {json.dumps(result, ensure_ascii=False)}")
 
-    def _derive_action_reply(self, tool_calls_executed: List[Dict[str, Any]]) -> Optional[str]:
+    def _derive_action_reply(
+        self,
+        tool_calls_executed: List[Dict[str, Any]],
+        *,
+        for_fallback: bool = False,
+    ) -> Optional[str]:
         terminal_tools = {
             "EnterChannel": lambda r: f"Pronto, entrei no {r.get('channel_name') or 'canal de voz'}!",
             "LeaveChannel": lambda _: "Saí do canal de voz.",
@@ -472,8 +482,10 @@ class BaseChatbot(ABC):
             tool = tc.get("tool")
             result = tc.get("result") or {}
             if not result.get("success"):
-                return None
+                continue
             if tool in skip_override:
+                if for_fallback:
+                    continue
                 return None
             replier = terminal_tools.get(tool)
             if replier:
@@ -486,7 +498,15 @@ class BaseChatbot(ABC):
         content: Optional[str] = None,
         send_mensagem_executed: bool = False,
     ) -> str:
-        action_reply = self._derive_action_reply(tool_calls_executed)
+        stripped_content = (content or "").strip() if content is not None else ""
+        for_fallback = content is None or not stripped_content or stripped_content in {
+            "Ação executada.",
+            "Ação executada com sucesso!",
+        }
+        action_reply = self._derive_action_reply(
+            tool_calls_executed,
+            for_fallback=for_fallback,
+        )
         if action_reply:
             return action_reply
         if content is not None:
