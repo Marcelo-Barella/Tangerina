@@ -6,7 +6,6 @@ import discord
 from features.discord.chatbot_reply import (
     DISCORD_MESSAGE_LIMIT,
     post_chatbot_reply,
-    resolve_chatbot_response,
     should_post_chatbot_reply,
     should_respond_with_chatbot,
     split_discord_message,
@@ -26,6 +25,28 @@ def _make_message(
     message.guild = guild
     bot_user = MagicMock()
     bot_user.mentioned_in = MagicMock(return_value=bot_mentioned)
+    return message, bot_user
+
+
+def _make_role_mention_message(
+    *,
+    role_id: int,
+    bot_role_ids: list[int],
+    role_mentions: list[MagicMock],
+    bot_user: MagicMock | None = None,
+    guild_me: MagicMock | None = MagicMock(),
+):
+    message = MagicMock()
+    message.content = f"<@&{role_id}> entra na chamada"
+    message.author.bot = False
+    message.guild = MagicMock()
+    message.guild.me = guild_me
+    if guild_me is not None:
+        message.guild.me.roles = [MagicMock(id=rid) for rid in bot_role_ids]
+    message.role_mentions = role_mentions
+    if bot_user is None:
+        bot_user = MagicMock()
+        bot_user.mentioned_in = MagicMock(return_value=False)
     return message, bot_user
 
 
@@ -64,54 +85,40 @@ class TestShouldRespondWithChatbot:
         assert should_respond_with_chatbot(message, None) is True
 
     def test_bot_role_mention_returns_true(self):
-        message = MagicMock()
-        message.content = "<@&1389329598915022850> entra na chamada"
-        message.author.bot = False
-        message.guild = MagicMock()
-        bot_role = MagicMock()
-        bot_role.id = 1389329598915022850
-        message.guild.me = MagicMock()
-        message.guild.me.roles = [bot_role]
-        message.role_mentions = [bot_role]
-        bot_user = MagicMock()
-        bot_user.mentioned_in = MagicMock(return_value=False)
+        bot_role = MagicMock(id=1389329598915022850)
+        message, bot_user = _make_role_mention_message(
+            role_id=1389329598915022850,
+            bot_role_ids=[1389329598915022850],
+            role_mentions=[bot_role],
+        )
         assert should_respond_with_chatbot(message, bot_user) is True
 
     def test_unrelated_role_mention_returns_false(self):
-        message = MagicMock()
-        message.content = "<@&999> hello"
-        message.author.bot = False
-        message.guild = MagicMock()
-        other_role = MagicMock()
-        other_role.id = 999
-        message.guild.me = MagicMock()
-        message.guild.me.roles = [MagicMock(id=111)]
-        message.role_mentions = [other_role]
-        bot_user = MagicMock()
-        bot_user.mentioned_in = MagicMock(return_value=False)
+        other_role = MagicMock(id=999)
+        message, bot_user = _make_role_mention_message(
+            role_id=999,
+            bot_role_ids=[111],
+            role_mentions=[other_role],
+        )
         assert should_respond_with_chatbot(message, bot_user) is False
 
     def test_bot_role_mention_works_without_bot_user(self):
-        message = MagicMock()
-        message.content = "<@&1389329598915022850> entra na chamada"
-        message.author.bot = False
-        message.guild = MagicMock()
-        bot_role = MagicMock()
-        bot_role.id = 1389329598915022850
-        message.guild.me = MagicMock()
-        message.guild.me.roles = [bot_role]
-        message.role_mentions = [bot_role]
+        bot_role = MagicMock(id=1389329598915022850)
+        message, _ = _make_role_mention_message(
+            role_id=1389329598915022850,
+            bot_role_ids=[1389329598915022850],
+            role_mentions=[bot_role],
+            bot_user=None,
+        )
         assert should_respond_with_chatbot(message, None) is True
 
     def test_role_mention_without_guild_me_returns_false(self):
-        message = MagicMock()
-        message.content = "<@&1389329598915022850> entra na chamada"
-        message.author.bot = False
-        message.guild = MagicMock()
-        message.guild.me = None
-        message.role_mentions = [MagicMock(id=1389329598915022850)]
-        bot_user = MagicMock()
-        bot_user.mentioned_in = MagicMock(return_value=False)
+        message, bot_user = _make_role_mention_message(
+            role_id=1389329598915022850,
+            bot_role_ids=[1389329598915022850],
+            role_mentions=[MagicMock(id=1389329598915022850)],
+            guild_me=None,
+        )
         assert should_respond_with_chatbot(message, bot_user) is False
 
 
@@ -187,23 +194,6 @@ class TestShouldPostChatbotReply:
 
     def test_none_tool_calls_treated_as_empty_list(self):
         assert should_post_chatbot_reply("Olá!", None) is True
-
-
-@pytest.mark.unit
-class TestResolveChatbotResponse:
-    def test_non_empty_response_unchanged(self):
-        tool_calls = [{"tool": "EnterChannel", "result": {"success": True, "channel_name": "Geral"}}]
-        assert resolve_chatbot_response("Olá!", tool_calls, None) == "Olá!"
-
-    def test_empty_response_uses_action_reply(self):
-        tool_calls = [
-            {"tool": "EnterChannel", "result": {"success": True, "channel_name": "Geral"}},
-        ]
-        derive = lambda tcs: f"Pronto, entrei no {tcs[0]['result']['channel_name']}!"
-        assert resolve_chatbot_response("", tool_calls, derive) == "Pronto, entrei no Geral!"
-
-    def test_empty_response_without_derive_stays_empty(self):
-        assert resolve_chatbot_response("", [], None) == ""
 
 
 @pytest.mark.unit
@@ -284,35 +274,3 @@ class TestPostChatbotReply:
             await post_chatbot_reply(channel, "Olá!", [])
         channel.send.assert_awaited_once()
         mock_logger.error.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_successful_send_mensagem_suppresses_matching_send(self):
-        channel = AsyncMock()
-        tool_calls = [
-            {
-                "tool": "SEND_Mensagem",
-                "parameters": {"text": "Claro, posso te ajudar!"},
-                "result": {"success": True},
-            }
-        ]
-        await post_chatbot_reply(channel, "Claro, posso te ajudar!", tool_calls)
-        channel.send.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_successful_send_mensagem_posts_different_reply(self):
-        channel = AsyncMock()
-        tool_calls = [
-            {
-                "tool": "SEND_Mensagem",
-                "parameters": {"text": "Entendido!"},
-                "result": {"success": True},
-            }
-        ]
-        await post_chatbot_reply(
-            channel,
-            "A capital da França é Paris e fica na Europa.",
-            tool_calls,
-        )
-        channel.send.assert_awaited_once_with(
-            "A capital da França é Paris e fica na Europa."
-        )

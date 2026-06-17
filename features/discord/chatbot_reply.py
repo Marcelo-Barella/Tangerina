@@ -1,7 +1,5 @@
 import logging
-from typing import Any, Callable, Optional
-
-import discord
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -59,24 +57,6 @@ def should_respond_with_chatbot(message: Any, bot_user: Any = None) -> bool:
     )
 
 
-def _successful_send_mensagem_texts(
-    tool_calls: Optional[list[dict[str, Any]]],
-) -> list[str]:
-    sent: list[str] = []
-    for tc in tool_calls or []:
-        if tc.get("tool") != "SEND_Mensagem":
-            continue
-        if tc.get("result", {}).get("success") is not True:
-            continue
-        text = tc.get("parameters", {}).get("text")
-        if not isinstance(text, str):
-            continue
-        normalized = text.strip()
-        if normalized:
-            sent.append(normalized)
-    return sent
-
-
 def should_post_chatbot_reply(
     response: Any,
     tool_calls: Optional[list[dict[str, Any]]],
@@ -88,26 +68,23 @@ def should_post_chatbot_reply(
         return False
     if normalized in _SUPPRESSED_RESPONSES:
         return False
-    sent_texts = _successful_send_mensagem_texts(tool_calls)
+    sent_texts: list[str] = []
+    for tc in tool_calls or []:
+        if tc.get("tool") != "SEND_Mensagem":
+            continue
+        if tc.get("result", {}).get("success") is not True:
+            continue
+        text = tc.get("parameters", {}).get("text")
+        if not isinstance(text, str):
+            continue
+        stripped = text.strip()
+        if stripped:
+            sent_texts.append(stripped)
     if sent_texts and normalized in sent_texts:
         return False
     if sent_texts and normalized == " ".join(sent_texts):
         return False
     return True
-
-
-def resolve_chatbot_response(
-    response: Any,
-    tool_calls: Optional[list[dict[str, Any]]],
-    derive_action_reply: Optional[Callable[[list[dict[str, Any]]], Optional[str]]] = None,
-) -> str:
-    if isinstance(response, str) and response.strip():
-        return response.strip()
-    if derive_action_reply and tool_calls:
-        action_reply = derive_action_reply(tool_calls)
-        if action_reply:
-            return action_reply
-    return ""
 
 
 async def post_chatbot_reply(
@@ -123,9 +100,6 @@ async def post_chatbot_reply(
     for chunk in split_discord_message(text):
         try:
             await channel.send(chunk)
-        except discord.HTTPException as e:
-            logger.error(f"Discord HTTP error sending chatbot reply: {e}")
-            return
         except Exception as e:
             logger.error(f"Error sending chatbot reply: {e}")
             return
