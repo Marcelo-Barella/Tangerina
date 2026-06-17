@@ -6,7 +6,6 @@ import discord
 from features.discord.chatbot_reply import (
     DISCORD_MESSAGE_LIMIT,
     post_chatbot_reply,
-    resolve_chatbot_response,
     should_post_chatbot_reply,
     should_respond_with_chatbot,
     split_discord_message,
@@ -187,23 +186,6 @@ class TestShouldPostChatbotReply:
 
     def test_none_tool_calls_treated_as_empty_list(self):
         assert should_post_chatbot_reply("Olá!", None) is True
-
-
-@pytest.mark.unit
-class TestResolveChatbotResponse:
-    def test_non_empty_response_unchanged(self):
-        tool_calls = [{"tool": "EnterChannel", "result": {"success": True, "channel_name": "Geral"}}]
-        assert resolve_chatbot_response("Olá!", tool_calls, None) == "Olá!"
-
-    def test_empty_response_uses_action_reply(self):
-        tool_calls = [
-            {"tool": "EnterChannel", "result": {"success": True, "channel_name": "Geral"}},
-        ]
-        derive = lambda tcs: f"Pronto, entrei no {tcs[0]['result']['channel_name']}!"
-        assert resolve_chatbot_response("", tool_calls, derive) == "Pronto, entrei no Geral!"
-
-    def test_empty_response_without_derive_stays_empty(self):
-        assert resolve_chatbot_response("", [], None) == ""
 
 
 @pytest.mark.unit
