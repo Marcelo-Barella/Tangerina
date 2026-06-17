@@ -24,5 +24,5 @@ def transcribe_openai_whisper(
         kwargs["language"] = language
     if prompt:
         kwargs["prompt"] = prompt
-    result = client.audio.transcriptions.create(**kwargs)
-    return (result.text or "").strip()
+    transcription = client.audio.transcriptions.create(**kwargs)
+    return (transcription.text or "").strip()

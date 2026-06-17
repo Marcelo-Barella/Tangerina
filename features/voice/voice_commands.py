@@ -15,7 +15,8 @@ import discord
 logger = logging.getLogger(__name__)
 
 MIN_AUDIO_CHUNKS = 10
-MIN_PCM_BYTES = MIN_AUDIO_CHUNKS * 3840
+PCM_FRAME_BYTES = 3840
+MIN_PCM_BYTES = MIN_AUDIO_CHUNKS * PCM_FRAME_BYTES
 MIN_SPEECH_RMS = 300
 QUEUE_DISPLAY_LIMIT = 5
 VOLUME_MIN = 0
@@ -132,10 +133,6 @@ class VoiceCommandSink(BaseSink):
     def wants_opus(self) -> bool:
         return False
 
-    def _extract_pcm(self, data: Any) -> Optional[bytes]:
-        pcm = getattr(data, 'pcm', None)
-        return pcm if pcm else None
-
     def _has_speech_energy(self, pcm_audio: bytes) -> bool:
         try:
             import audioop
@@ -164,12 +161,14 @@ class VoiceCommandSink(BaseSink):
             packet = getattr(data, 'packet', None)
             if packet is not None and getattr(packet, 'decrypted_data', None) == OPUS_SILENCE:
                 return
-            pcm = self._extract_pcm(data)
-            if pcm:
-                if user.id not in self.audio_buffers:
-                    self.audio_buffers[user.id] = deque(maxlen=AUDIO_BUFFER_MAXLEN)
-                self.audio_buffers[user.id].append(pcm)
-                self.last_audio_timestamps[user.id] = time.time()
+            pcm = getattr(data, 'pcm', None)
+            if not pcm:
+                return
+            buffer = self.audio_buffers.setdefault(
+                user.id, deque(maxlen=AUDIO_BUFFER_MAXLEN)
+            )
+            buffer.append(pcm)
+            self.last_audio_timestamps[user.id] = time.time()
         except OpusError as e:
             logger.error(f"OpusError in write() for user {user.id if user else None}: {e}")
             self._schedule_listen_recovery()
@@ -577,7 +576,7 @@ class VoiceCommandSink(BaseSink):
             asyncio.run_coroutine_threadsafe(start_monitor(), loop)
         else:
             try:
-                current_loop = asyncio.get_running_loop()
+                asyncio.get_running_loop()
                 self._reconnection_task = asyncio.create_task(self._check_connection_health())
             except RuntimeError:
                 pass

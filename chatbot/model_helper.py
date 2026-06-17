@@ -5,44 +5,10 @@ from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
 
-from features.discord.chatbot_reply import SUPPRESSED_ACTION_REPLIES
+from chatbot.tool_response import derive_action_reply, resolve_tool_response
+from chatbot.voice_join import is_join_voice_request, text_claims_voice_join
 
 logger = logging.getLogger(__name__)
-
-_JOIN_VOICE_REQUEST_RE = re.compile(
-    r"(?:\b(?:entra|entre|entrar|join|conecta|conectar)\b).{0,40}(?:chamada|canal|voice|voz|call)"
-    r"|(?:chamada|canal\s+de\s+voz).{0,20}\b(?:entra|entre|join)\b",
-    re.IGNORECASE,
-)
-_JOIN_VOICE_VERB_RE = re.compile(
-    r"\b(entra|entre|entrar|join|conecta|conectar)\b",
-    re.IGNORECASE,
-)
-_JOIN_VOICE_NEGATION_RE = re.compile(r"\b(não|nao|nunca|jamais|sem)\s*$", re.IGNORECASE)
-_JOIN_VOICE_HOW_TO_RE = re.compile(r"\bcomo\s+entrar\b", re.IGNORECASE)
-_JOIN_VOICE_CLAIM_RE = re.compile(
-    r"\b(entrei|entrou|joining|joined|conectei|conectado)\b.{0,40}\b(chamada|canal|voice|voz|call)\b",
-    re.IGNORECASE,
-)
-
-
-def is_join_voice_request(message: str) -> bool:
-    text = message.strip()
-    if not text:
-        return False
-    if _JOIN_VOICE_HOW_TO_RE.search(text):
-        return False
-    match = _JOIN_VOICE_REQUEST_RE.search(text)
-    if not match:
-        return False
-    verb_match = _JOIN_VOICE_VERB_RE.search(match.group())
-    if verb_match and _JOIN_VOICE_NEGATION_RE.search(text[: match.start() + verb_match.start()]):
-        return False
-    return True
-
-
-def text_claims_voice_join(text: str) -> bool:
-    return bool(_JOIN_VOICE_CLAIM_RE.search(text.strip()))
 
 DEFAULT_PERSONA_FALLBACK = "\n".join([
     "IDENTIDADE",
@@ -466,64 +432,7 @@ class BaseChatbot(ABC):
         tool_calls_executed.append({"tool": "EnterChannel", "parameters": params, "result": result})
         logger.info(f"Auto EnterChannel after join request: {json.dumps(result, ensure_ascii=False)}")
 
-    def _derive_action_reply(
-        self,
-        tool_calls_executed: List[Dict[str, Any]],
-        *,
-        for_fallback: bool = False,
-    ) -> Optional[str]:
-        terminal_tools = {
-            "EnterChannel": lambda r: f"Pronto, entrei no {r.get('channel_name') or 'canal de voz'}!",
-            "LeaveChannel": lambda _: "Saí do canal de voz.",
-            "MusicLeave": lambda _: "Saí do canal de voz.",
-        }
-        skip_override = frozenset({
-            "MusicPlay", "MusicSpotifyPlay", "SEND_Mensagem", "TTSSpeak",
-        })
-        if for_fallback:
-            for tc in reversed(tool_calls_executed):
-                result = tc.get("result") or {}
-                if not result.get("success"):
-                    return f"Erro ao executar ação: {result.get('error', 'Erro desconhecido')}"
-        for tc in reversed(tool_calls_executed):
-            tool = tc.get("tool")
-            result = tc.get("result") or {}
-            if not result.get("success"):
-                continue
-            if tool in skip_override:
-                if for_fallback:
-                    continue
-                return None
-            replier = terminal_tools.get(tool)
-            if replier:
-                return replier(result)
-        return None
-
-    def _resolve_tool_response(
-        self,
-        tool_calls_executed: List[Dict[str, Any]],
-        content: Optional[str] = None,
-        send_mensagem_executed: bool = False,
-    ) -> str:
-        stripped_content = (content or "").strip() if content is not None else ""
-        for_fallback = (
-            content is None
-            or not stripped_content
-            or stripped_content in SUPPRESSED_ACTION_REPLIES
-        )
-        action_reply = self._derive_action_reply(
-            tool_calls_executed,
-            for_fallback=for_fallback,
-        )
-        if action_reply:
-            return action_reply
-        if content is not None:
-            return (content or "").strip()
-        if send_mensagem_executed:
-            return ""
-        return "Ação executada."
-
-    def _build_tool_message(self, tool_name: str, tool_result: Dict[str, Any], 
+    def _build_tool_message(self, tool_name: str, tool_result: Dict[str, Any],
                             tool_call_id: Optional[str] = None) -> Dict[str, Any]:
         message = {
             "role": "tool",
@@ -903,14 +812,14 @@ class BaseChatbot(ABC):
                             return "", tool_calls_executed
                         if tool_calls_executed:
                             return (
-                                self._resolve_tool_response(
+                                resolve_tool_response(
                                     tool_calls_executed,
                                     send_mensagem_executed=send_mensagem_executed,
                                 ),
                                 tool_calls_executed,
                             )
                     if tool_calls_executed:
-                        action_reply = self._derive_action_reply(tool_calls_executed)
+                        action_reply = derive_action_reply(tool_calls_executed)
                         if action_reply:
                             return action_reply, tool_calls_executed
                     break
@@ -929,7 +838,7 @@ class BaseChatbot(ABC):
                         message, tool_calls_executed, app_functions or {}, guild_id, user_id
                     )
                     return (
-                        self._resolve_tool_response(
+                        resolve_tool_response(
                             tool_calls_executed,
                             content=response_text,
                             send_mensagem_executed=send_mensagem_executed,
@@ -939,7 +848,7 @@ class BaseChatbot(ABC):
                 
                 if any(marker in content_stripped.lower() for marker in ["</tool_call>", "<arg_key>", "<arg_value>", "<tool_call>"]):
                     return (
-                        self._resolve_tool_response(
+                        resolve_tool_response(
                             tool_calls_executed,
                             send_mensagem_executed=send_mensagem_executed,
                         ),
@@ -953,7 +862,7 @@ class BaseChatbot(ABC):
                     if content_stripped:
                         extracted = self._extract_text_from_malformed_tool_call(content_stripped)
                         return (
-                            self._resolve_tool_response(
+                            resolve_tool_response(
                                 tool_calls_executed,
                                 content=extracted if extracted else content_stripped,
                             ),
@@ -963,14 +872,14 @@ class BaseChatbot(ABC):
                         return " ".join(sent_message_texts), tool_calls_executed
                     if send_mensagem_executed or tool_calls_executed:
                         return (
-                            self._resolve_tool_response(
+                            resolve_tool_response(
                                 tool_calls_executed,
                                 send_mensagem_executed=send_mensagem_executed,
                             ),
                             tool_calls_executed,
                         )
                     return (
-                        self._resolve_tool_response(
+                        resolve_tool_response(
                             tool_calls_executed,
                             send_mensagem_executed=send_mensagem_executed,
                         ),
@@ -982,7 +891,7 @@ class BaseChatbot(ABC):
                         logger.warning("Response truncated due to length limit")
                         extracted = self._extract_text_from_malformed_tool_call(content_stripped)
                         return (
-                            self._resolve_tool_response(
+                            resolve_tool_response(
                                 tool_calls_executed,
                                 content=extracted if extracted else content_stripped,
                             ),
@@ -997,7 +906,7 @@ class BaseChatbot(ABC):
                 if content_stripped:
                     extracted = self._extract_text_from_malformed_tool_call(content_stripped)
                     return (
-                        self._resolve_tool_response(
+                        resolve_tool_response(
                             tool_calls_executed,
                             content=extracted if extracted else content_stripped,
                         ),
@@ -1007,17 +916,17 @@ class BaseChatbot(ABC):
                 
             except Exception as e:
                 logger.error(f"API request failed: {e}")
-                action_reply = self._derive_action_reply(tool_calls_executed)
+                action_reply = derive_action_reply(tool_calls_executed)
                 if action_reply:
                     return action_reply, tool_calls_executed
                 return "Deu ruim aqui do meu lado. Tenta de novo em instantes.", tool_calls_executed
         
         logger.warning(f"Exceeded maximum iterations ({max_iterations}) without completion")
         if tool_calls_executed:
-            action_reply = self._derive_action_reply(tool_calls_executed)
+            action_reply = derive_action_reply(tool_calls_executed)
             if action_reply:
                 return action_reply, tool_calls_executed
-            return self._resolve_tool_response(tool_calls_executed), tool_calls_executed
+            return resolve_tool_response(tool_calls_executed), tool_calls_executed
         return "Tive um problema pra responder agora. Tenta de novo?", tool_calls_executed
 
     async def generate_response(self, message: str, context: Optional[List[Dict]] = None) -> str:
