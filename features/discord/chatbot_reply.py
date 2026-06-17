@@ -5,7 +5,7 @@ logger = logging.getLogger(__name__)
 
 DISCORD_MESSAGE_LIMIT = 2000
 
-_SUPPRESSED_RESPONSES = frozenset({
+SUPPRESSED_ACTION_REPLIES = frozenset({
     "Ação executada.",
     "Ação executada com sucesso!",
 })
@@ -79,7 +79,7 @@ def should_post_chatbot_reply(
     normalized = response.strip()
     if not normalized:
         return None
-    if normalized in _SUPPRESSED_RESPONSES:
+    if normalized in SUPPRESSED_ACTION_REPLIES:
         return None
     if normalized.startswith("Entrei no canal "):
         return None

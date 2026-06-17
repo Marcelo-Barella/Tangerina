@@ -5,6 +5,8 @@ from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
 
+from features.discord.chatbot_reply import SUPPRESSED_ACTION_REPLIES
+
 logger = logging.getLogger(__name__)
 
 _JOIN_VOICE_REQUEST_RE = re.compile(
@@ -504,10 +506,11 @@ class BaseChatbot(ABC):
         send_mensagem_executed: bool = False,
     ) -> str:
         stripped_content = (content or "").strip() if content is not None else ""
-        for_fallback = content is None or not stripped_content or stripped_content in {
-            "Ação executada.",
-            "Ação executada com sucesso!",
-        }
+        for_fallback = (
+            content is None
+            or not stripped_content
+            or stripped_content in SUPPRESSED_ACTION_REPLIES
+        )
         action_reply = self._derive_action_reply(
             tool_calls_executed,
             for_fallback=for_fallback,

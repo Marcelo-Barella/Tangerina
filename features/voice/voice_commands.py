@@ -114,6 +114,7 @@ class VoiceCommandSink(BaseSink):
         self._recovering_listener: bool = False
         self._health_monitor_started: bool = False
         self._transcribe_lock = asyncio.Lock()
+        self._openai_client: Optional[Any] = None
         self._validate_provider_config()
 
     def _validate_provider_config(self) -> None:
@@ -207,7 +208,7 @@ class VoiceCommandSink(BaseSink):
         if len(combined_pcm) < MIN_PCM_BYTES or not self._has_speech_energy(combined_pcm):
             return
         try:
-            audio_data = self._combine_audio_chunks(audio_chunks)
+            audio_data = self._pcm_to_wav(combined_pcm)
             async with self._transcribe_lock:
                 text = await self._transcribe_audio(audio_data)
             if not text or not text.strip():
@@ -238,7 +239,9 @@ class VoiceCommandSink(BaseSink):
             await self._handle_voice_command(member, text.strip())
 
     def _combine_audio_chunks(self, chunks: List[bytes]) -> io.BytesIO:
-        combined = b''.join(chunks)
+        return self._pcm_to_wav(b''.join(chunks))
+
+    def _pcm_to_wav(self, combined: bytes) -> io.BytesIO:
         try:
             import audioop
             mono_audio = audioop.tomono(combined, 2, 1.0, 1.0)
@@ -289,25 +292,19 @@ class VoiceCommandSink(BaseSink):
             logger.error("OPENAI_API_KEY not set for OpenAI Whisper API")
             return None
         try:
-            client = build_openai_whisper_client(self.openai_api_key, timeout=TRANSCRIPTION_TIMEOUT)
+            if self._openai_client is None:
+                self._openai_client = build_openai_whisper_client(
+                    self.openai_api_key, timeout=TRANSCRIPTION_TIMEOUT
+                )
             audio_data.seek(0)
-            audio_bytes = audio_data.read()
-            tmp_file_path = None
-            try:
-                with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_file:
-                    tmp_file.write(audio_bytes)
-                    tmp_file_path = tmp_file.name
-                with open(tmp_file_path, 'rb') as audio_file:
-                    text = await asyncio.to_thread(
-                        transcribe_openai_whisper,
-                        client,
-                        audio_file,
-                        language=DEFAULT_WHISPER_LANGUAGE or None,
-                        prompt=WHISPER_INITIAL_PROMPT or None,
-                    )
-                return text if text else None
-            finally:
-                self._cleanup_temp_file(tmp_file_path)
+            text = await asyncio.to_thread(
+                transcribe_openai_whisper,
+                self._openai_client,
+                audio_data,
+                language=DEFAULT_WHISPER_LANGUAGE or None,
+                prompt=WHISPER_INITIAL_PROMPT or None,
+            )
+            return text if text else None
         except Exception as e:
             logger.error(f"OpenAI Whisper API transcription error: {e}")
             return None
@@ -328,7 +325,7 @@ class VoiceCommandSink(BaseSink):
             result = await asyncio.to_thread(
                 model.transcribe,
                 tmp_file_path,
-                language="pt",
+                language=DEFAULT_WHISPER_LANGUAGE or None,
                 initial_prompt=WHISPER_INITIAL_PROMPT,
             )
             text = result.get('text', '').strip()
@@ -337,7 +334,11 @@ class VoiceCommandSink(BaseSink):
             logger.error(f"Whisper transcription error: {e}")
             return None
         finally:
-            self._cleanup_temp_file(tmp_file_path)
+            if tmp_file_path:
+                try:
+                    os.unlink(tmp_file_path)
+                except OSError:
+                    pass
 
     async def _transcribe_sidecar(self, audio_data: io.BytesIO) -> Optional[str]:
         audio_data.seek(0)
@@ -390,13 +391,6 @@ class VoiceCommandSink(BaseSink):
         except Exception as e:
             logger.error(f"GLM-ASR-2512 transcription error: {e}")
             return None
-
-    def _cleanup_temp_file(self, file_path: Optional[str]) -> None:
-        if file_path:
-            try:
-                os.unlink(file_path)
-            except Exception:
-                pass
 
     def _get_text_channel(self) -> Optional[discord.TextChannel]:
         guild = self.bot.get_guild(self.guild_id)
