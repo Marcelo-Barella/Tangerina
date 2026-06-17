@@ -132,23 +132,46 @@ class TestShouldPostChatbotReply:
     def test_acao_executada_returns_false(self):
         assert should_post_chatbot_reply("Ação executada.", []) is False
 
-    def test_acao_executada_com_sucesso_returns_false(self):
-        assert should_post_chatbot_reply("Ação executada com sucesso!", []) is False
-
     def test_conversational_text_returns_true(self):
         assert should_post_chatbot_reply("Claro, posso te ajudar com isso!", []) is True
 
     def test_error_string_returns_true(self):
         assert should_post_chatbot_reply("Erro ao executar ação: Channel not found", []) is True
 
-    def test_successful_send_mensagem_suppresses_reply(self):
+    def test_successful_send_mensagem_suppresses_matching_reply(self):
+        tool_calls = [
+            {
+                "tool": "SEND_Mensagem",
+                "parameters": {"text": "Claro, posso te ajudar!"},
+                "result": {"success": True},
+            }
+        ]
+        assert should_post_chatbot_reply("Claro, posso te ajudar!", tool_calls) is False
+
+    def test_successful_send_mensagem_does_not_suppress_different_reply(self):
+        tool_calls = [
+            {
+                "tool": "SEND_Mensagem",
+                "parameters": {"text": "Entendido!"},
+                "result": {"success": True},
+            }
+        ]
+        assert (
+            should_post_chatbot_reply(
+                "A capital da França é Paris e fica na Europa.",
+                tool_calls,
+            )
+            is True
+        )
+
+    def test_successful_send_mensagem_without_text_does_not_suppress(self):
         tool_calls = [
             {
                 "tool": "SEND_Mensagem",
                 "result": {"success": True},
             }
         ]
-        assert should_post_chatbot_reply("Claro, posso te ajudar!", tool_calls) is False
+        assert should_post_chatbot_reply("Claro, posso te ajudar!", tool_calls) is True
 
     def test_failed_send_mensagem_does_not_suppress(self):
         tool_calls = [
@@ -178,6 +201,13 @@ class TestResolveChatbotResponse:
 
     def test_empty_response_without_derive_stays_empty(self):
         assert resolve_chatbot_response("", [], None) == ""
+
+    def test_suppressed_fallback_uses_action_reply(self):
+        tool_calls = [
+            {"tool": "EnterChannel", "result": {"success": True, "channel_name": "Geral"}},
+        ]
+        derive = lambda tcs: f"Pronto, entrei no {tcs[0]['result']['channel_name']}!"
+        assert resolve_chatbot_response("Ação executada.", tool_calls, derive) == "Pronto, entrei no Geral!"
 
 
 @pytest.mark.unit
@@ -260,8 +290,33 @@ class TestPostChatbotReply:
         mock_logger.error.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_successful_send_mensagem_suppresses_send(self):
+    async def test_successful_send_mensagem_suppresses_matching_send(self):
         channel = AsyncMock()
-        tool_calls = [{"tool": "SEND_Mensagem", "result": {"success": True}}]
+        tool_calls = [
+            {
+                "tool": "SEND_Mensagem",
+                "parameters": {"text": "Claro, posso te ajudar!"},
+                "result": {"success": True},
+            }
+        ]
         await post_chatbot_reply(channel, "Claro, posso te ajudar!", tool_calls)
         channel.send.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_successful_send_mensagem_posts_different_reply(self):
+        channel = AsyncMock()
+        tool_calls = [
+            {
+                "tool": "SEND_Mensagem",
+                "parameters": {"text": "Entendido!"},
+                "result": {"success": True},
+            }
+        ]
+        await post_chatbot_reply(
+            channel,
+            "A capital da França é Paris e fica na Europa.",
+            tool_calls,
+        )
+        channel.send.assert_awaited_once_with(
+            "A capital da França é Paris e fica na Europa."
+        )

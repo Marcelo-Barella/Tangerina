@@ -200,7 +200,7 @@ class MusicBot:
         try:
             result = await self._move_or_connect(guild_id, channel, voice_recv_module)
             return result
-        except (discord.errors.ClientException, Exception) as e:
+        except discord.errors.ClientException as e:
             if 'already connected' in str(e).lower():
                 return self._get_existing_voice_client(guild_id, channel_id)
             if 'pynacl' in str(e).lower() or 'nacl' in str(e).lower():

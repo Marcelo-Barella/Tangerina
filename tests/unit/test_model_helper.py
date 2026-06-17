@@ -337,6 +337,15 @@ class TestLoadTangerinaPersona:
         for tag in ("<context>", "<instructions>", "<examples>", "<formatting>"):
             assert tag in result
 
+    def test_load_tangerina_persona_falls_back_when_path_is_directory(self, tmp_path, monkeypatch):
+        persona_dir = tmp_path / "tangerina_persona.txt"
+        persona_dir.mkdir()
+        fake_module = tmp_path / "model_helper.py"
+        fake_module.touch()
+        monkeypatch.setattr("chatbot.model_helper.__file__", str(fake_module))
+        result = load_tangerina_persona()
+        assert result == DEFAULT_PERSONA_FALLBACK
+
     def test_default_persona_fallback_contains_tangerina(self):
         assert 'Tangerina' in DEFAULT_PERSONA_FALLBACK
 
@@ -516,6 +525,19 @@ class TestDeriveActionReply:
         llm_text = "Adicionei 3 músicas na fila."
         assert test_chatbot._resolve_tool_response(tool_calls, content=llm_text) == llm_text
 
+    def test_music_play_fallback_uses_enter_channel_reply(self, test_chatbot):
+        tool_calls = [
+            {
+                "tool": "EnterChannel",
+                "result": {"success": True, "channel_name": "Geral"},
+            },
+            {
+                "tool": "MusicPlay",
+                "result": {"success": True, "message": "Now playing: song"},
+            },
+        ]
+        assert test_chatbot._resolve_tool_response(tool_calls) == "Pronto, entrei no Geral!"
+
     def test_failed_enter_channel_keeps_llm_text(self, test_chatbot):
         tool_calls = [
             {
@@ -549,6 +571,9 @@ class TestDeriveActionReply:
 class TestJoinVoiceHelpers:
     def test_is_join_voice_request_matches_entra_na_chamada(self):
         assert is_join_voice_request("@Tangerina Entra na chamada por favor")
+
+    def test_is_join_voice_request_rejects_how_to(self):
+        assert not is_join_voice_request("explica como entrar no canal de voz")
 
     def test_text_claims_voice_join_matches_entrei_na_chamada(self):
         assert text_claims_voice_join("@1389316439193944275, entrei na chamada!")

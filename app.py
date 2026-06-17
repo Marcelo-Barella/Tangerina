@@ -82,12 +82,8 @@ bot_loop: Optional[asyncio.AbstractEventLoop] = None
 
 music_bot = MusicBot(bot)
 music_bot.zhipu_api_key = os.getenv('ZHIPU_API_KEY')
-_openai_api_key = (os.getenv('OPENAI_API_KEY') or '').strip()
-_whisper_provider = os.getenv('WHISPER_PROVIDER', '').strip()
-if not _whisper_provider:
-    _whisper_provider = 'openai-api' if _openai_api_key else 'sidecar'
-music_bot.whisper_provider = _whisper_provider
-music_bot.openai_api_key = _openai_api_key or None
+music_bot.whisper_provider = os.getenv('WHISPER_PROVIDER', 'sidecar')
+music_bot.openai_api_key = os.getenv('OPENAI_API_KEY')
 
 spotify_client = None
 if SpotifyIntegration and (SPOTIFY_CLIENT_ID := os.getenv('SPOTIFY_CLIENT_ID')) and (SPOTIFY_CLIENT_SECRET := os.getenv('SPOTIFY_CLIENT_SECRET')):
@@ -198,13 +194,6 @@ async def on_message(message: discord.Message) -> None:
         return
 
     will_respond = bool(chatbot and should_respond_with_chatbot(message, bot.user))
-    logger.info(
-        "Discord message received ch=%s user=%s respond=%s preview=%r",
-        message.channel.id,
-        message.author.id,
-        will_respond,
-        (message.content or "")[:80],
-    )
 
     await bot.process_commands(message)
 
@@ -236,7 +225,11 @@ async def on_message(message: discord.Message) -> None:
                 message.content, [], guild_id, channel_id, user_id, music_functions, retrieved_memories
             )
 
-            response = resolve_chatbot_response(response, tool_calls, chatbot._derive_action_reply)
+            response = resolve_chatbot_response(
+                response,
+                tool_calls,
+                lambda tcs: chatbot._derive_action_reply(tcs, for_fallback=True),
+            )
 
             if chatbot.memory_manager:
                 await chatbot.memory_manager.store_conversation(message.content, response, guild_id, channel_id, user_id, tool_calls)
@@ -244,7 +237,7 @@ async def on_message(message: discord.Message) -> None:
             await post_chatbot_reply(message.channel, response, tool_calls)
 
     except Exception as e:
-        logger.error(f'Error processing message: {e}', exc_info=True)
+        logger.error(f'Error processing message: {e}')
 
 @bot.event
 async def on_error(event: str, *args: Any, **kwargs: Any) -> None:
