@@ -55,6 +55,7 @@ except ImportError:
     create_omnivoice_client = None
 
 from features.music.music_bot import MusicBot, YTDLSource
+from features.voice.voice_recv_patches import apply_voice_recv_patches
 from features.music.music_service import MusicService, _resolve_voice_channel
 from features.tts.tts_handler import speak_tts_unified
 from flask_routes import create_flask_app
@@ -64,6 +65,7 @@ from features.discord.chatbot_reply import (
 )
 
 load_dotenv()
+apply_voice_recv_patches()
 
 logging.basicConfig(level=os.getenv('LOG_LEVEL', 'INFO'), format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)

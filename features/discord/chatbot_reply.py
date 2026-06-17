@@ -5,10 +5,7 @@ logger = logging.getLogger(__name__)
 
 DISCORD_MESSAGE_LIMIT = 2000
 
-_SUPPRESSED_RESPONSES = frozenset({
-    "Ação executada.",
-    "Ação executada com sucesso!",
-})
+_SUPPRESSED_RESPONSES = frozenset({"Ação executada."})
 
 
 def split_discord_message(text: str) -> list[str]:

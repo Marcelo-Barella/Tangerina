@@ -201,7 +201,7 @@ class MusicBot:
         try:
             result = await self._move_or_connect(guild_id, channel, voice_recv_module)
             return result
-        except (discord.errors.ClientException, Exception) as e:
+        except Exception as e:
             if 'already connected' in str(e).lower():
                 return self._get_existing_voice_client(guild_id, channel_id)
             if 'pynacl' in str(e).lower() or 'nacl' in str(e).lower():
@@ -215,8 +215,8 @@ class MusicBot:
                 except Exception as retry_e:
                     logger.error(f'Voice connection retry failed: {retry_e}')
                     return None
-            raise
-        except Exception as e:
+            if isinstance(e, discord.errors.ClientException):
+                raise
             logger.error(f'Error joining voice channel: {e}')
             return None
 

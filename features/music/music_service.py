@@ -6,6 +6,8 @@ from features.music.music_bot import MusicBot, YTDLSource, FFMPEG_OPTIONS
 
 logger = logging.getLogger(__name__)
 
+_MEMBER_LOOKUP = object()
+
 
 async def _resolve_voice_channel(guild_id: int, channel_id: int, bot, music_bot: MusicBot) -> Tuple[Optional[int], Optional[str]]:
     guild = bot.get_guild(guild_id)
@@ -30,6 +32,17 @@ async def _resolve_voice_channel(guild_id: int, channel_id: int, bot, music_bot:
     return channel_id, None
 
 
+def _find_user_voice_channel(guild, user_id: int, member=_MEMBER_LOOKUP):
+    if member is _MEMBER_LOOKUP:
+        member = guild.get_member(user_id)
+    if member and member.voice and member.voice.channel:
+        return member.voice.channel
+    for voice_ch in guild.voice_channels:
+        if any(m.id == user_id for m in voice_ch.members):
+            return voice_ch
+    return None
+
+
 class MusicService:
     def __init__(self, bot, music_bot: MusicBot, spotify_client=None):
         self.bot = bot
@@ -42,13 +55,19 @@ class MusicService:
             return {'success': False, 'error': f'Guild {guild_id} not found'}
 
         member = guild.get_member(user_id)
-        if not member:
-            return {'success': False, 'error': f'User {user_id} not found'}
+        channel = _find_user_voice_channel(guild, user_id, member)
+        if not channel and member is None:
+            try:
+                member = await guild.fetch_member(user_id)
+            except (discord.NotFound, discord.HTTPException):
+                return {'success': False, 'error': f'User {user_id} not found'}
+            channel = _find_user_voice_channel(guild, user_id, member)
 
-        if not member.voice or not member.voice.channel:
+        if not channel:
+            if member is None:
+                return {'success': False, 'error': f'User {user_id} not found'}
             return {'success': True, 'in_voice_channel': False, 'channel_id': None, 'channel_name': None}
 
-        channel = member.voice.channel
         return {
             'success': True,
             'in_voice_channel': True,

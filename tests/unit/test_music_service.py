@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 from tests.conftest import TEST_GUILD_ID, TEST_CHANNEL_ID, TEST_USER_ID
+from features.music.music_service import _find_user_voice_channel
 from tests.fixtures.discord_fixtures import (
     create_mock_guild,
     create_mock_voice_channel,
@@ -67,8 +68,11 @@ class TestGetUserVoiceChannel:
 
     @pytest.mark.asyncio
     async def test_user_not_found(self, music_service, mock_bot):
+        import discord
         guild = create_mock_guild()
         guild.get_member = MagicMock(return_value=None)
+        guild.fetch_member = AsyncMock(side_effect=discord.NotFound(MagicMock(), "not found"))
+        guild.voice_channels = []
         mock_bot.get_guild.return_value = guild
 
         result = await music_service.get_user_voice_channel(TEST_GUILD_ID, TEST_USER_ID)
@@ -103,6 +107,61 @@ class TestGetUserVoiceChannel:
         assert result['in_voice_channel'] is True
         assert result['channel_id'] == voice_channel.id
         assert result['channel_name'] == voice_channel.name
+
+    @pytest.mark.asyncio
+    async def test_user_in_voice_via_channel_members_when_member_voice_stale(self, music_service, mock_bot):
+        guild = create_mock_guild()
+        voice_channel = create_mock_voice_channel()
+        member_in_channel = create_mock_member()
+        voice_channel.members = [member_in_channel]
+        guild.voice_channels = [voice_channel]
+        member = create_mock_member()
+        guild.get_member = MagicMock(return_value=member)
+        mock_bot.get_guild.return_value = guild
+
+        result = await music_service.get_user_voice_channel(TEST_GUILD_ID, TEST_USER_ID)
+
+        assert result['success'] is True
+        assert result['in_voice_channel'] is True
+        assert result['channel_id'] == voice_channel.id
+        assert result['channel_name'] == voice_channel.name
+
+    @pytest.mark.asyncio
+    async def test_fetch_member_finds_voice_after_cache_miss(self, music_service, mock_bot):
+        guild = create_mock_guild()
+        voice_channel = create_mock_voice_channel()
+        member = create_mock_member(voice_channel=voice_channel)
+        guild.get_member = MagicMock(side_effect=[None, member])
+        guild.fetch_member = AsyncMock(return_value=member)
+        guild.voice_channels = []
+        mock_bot.get_guild.return_value = guild
+
+        result = await music_service.get_user_voice_channel(TEST_GUILD_ID, TEST_USER_ID)
+
+        assert result['success'] is True
+        assert result['in_voice_channel'] is True
+        assert result['channel_id'] == voice_channel.id
+        guild.fetch_member.assert_awaited_once_with(TEST_USER_ID)
+
+
+@pytest.mark.unit
+class TestFindUserVoiceChannel:
+    def test_prefers_member_voice_state(self):
+        guild = create_mock_guild()
+        voice_channel = create_mock_voice_channel()
+        member = create_mock_member(voice_channel=voice_channel)
+        guild.get_member = MagicMock(return_value=member)
+
+        assert _find_user_voice_channel(guild, TEST_USER_ID) == voice_channel
+
+    def test_falls_back_to_voice_channel_members(self):
+        guild = create_mock_guild()
+        voice_channel = create_mock_voice_channel()
+        voice_channel.members = [create_mock_member()]
+        guild.voice_channels = [voice_channel]
+        guild.get_member = MagicMock(return_value=create_mock_member())
+
+        assert _find_user_voice_channel(guild, TEST_USER_ID) == voice_channel
 
 
 class TestPlaySpotifyMusic:

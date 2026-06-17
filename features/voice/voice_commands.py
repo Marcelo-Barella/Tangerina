@@ -25,10 +25,10 @@ AUDIO_BUFFER_MAXLEN = 150
 AUDIO_SAMPLE_RATE = 48000
 AUDIO_SAMPLE_WIDTH = 2
 AUDIO_CHANNELS = 1
-TRANSCRIPTION_TIMEOUT = 30
 LISTENING_VOLUME = 20
 CONNECTION_HEALTH_CHECK_INTERVAL = 5.0
 CONNECTION_TIMEOUT = 10.0
+TRANSCRIPTION_TIMEOUT = 30
 
 try:
     from discord.ext import voice_recv
@@ -240,6 +240,7 @@ class VoiceCommandSink(BaseSink):
         handler = provider_map.get(self.whisper_provider)
         if handler:
             return await handler(audio_data)
+        logger.warning("Unknown WHISPER_PROVIDER %r, falling back to zhipu", self.whisper_provider)
         return await self._transcribe_zhipu(audio_data)
 
     async def _transcribe_openai_api(self, audio_data: io.BytesIO) -> Optional[str]:
