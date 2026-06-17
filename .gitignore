@@ -1,10 +1,12 @@
 .cursor/
 .vscode/
+docs/superpowers/
 
 CLAUDE.md
 AGENTS.md
 
 tangerina_persona.txt
+chatbot/tangerina_persona.txt
 
 .venv/
 venv/

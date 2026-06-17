@@ -129,6 +129,13 @@ def health() -> Tuple[Response, int]:
         return jsonify({"status": "error", "error": _load_error}), 503
     if _model_state is None or not _model_ready:
         return jsonify({"status": "loading"}), 503
+    if _blocked_by_hung_inference():
+        return jsonify(
+            {
+                "status": "recovering",
+                "error": "TTS service is recovering from a prior timeout",
+            }
+        ), 503
 
     return jsonify(
         {
