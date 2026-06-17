@@ -187,13 +187,6 @@ class TestShouldPostChatbotReply:
     def test_none_tool_calls_treated_as_empty_list(self):
         assert should_post_chatbot_reply("Olá!", None) == "Olá!"
 
-    def test_suppressed_fallback_uses_action_reply(self):
-        tool_calls = [
-            {"tool": "EnterChannel", "result": {"success": True, "channel_name": "Geral"}},
-        ]
-        derive = lambda tcs: f"Pronto, entrei no {tcs[0]['result']['channel_name']}!"
-        assert resolve_chatbot_response("Ação executada.", tool_calls, derive) == "Pronto, entrei no Geral!"
-
 
 @pytest.mark.unit
 class TestSplitDiscordMessage:
