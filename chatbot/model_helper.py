@@ -8,10 +8,15 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 _JOIN_VOICE_REQUEST_RE = re.compile(
-    r"(?:entra|entre|entrar|join|conecta|conectar).{0,40}(?:chamada|canal|voice|voz|call)"
-    r"|(?:chamada|canal\s+de\s+voz).{0,20}(?:entra|entre|join)",
+    r"(?:\b(?:entra|entre|entrar|join|conecta|conectar)\b).{0,40}(?:chamada|canal|voice|voz|call)"
+    r"|(?:chamada|canal\s+de\s+voz).{0,20}\b(?:entra|entre|join)\b",
     re.IGNORECASE,
 )
+_JOIN_VOICE_VERB_RE = re.compile(
+    r"\b(entra|entre|entrar|join|conecta|conectar)\b",
+    re.IGNORECASE,
+)
+_JOIN_VOICE_NEGATION_RE = re.compile(r"\b(não|nao|nunca|jamais|sem)\s*$", re.IGNORECASE)
 _JOIN_VOICE_CLAIM_RE = re.compile(
     r"\b(entrei|entrou|joining|joined|conectei|conectado)\b.{0,40}\b(chamada|canal|voice|voz|call)\b",
     re.IGNORECASE,
@@ -19,7 +24,14 @@ _JOIN_VOICE_CLAIM_RE = re.compile(
 
 
 def is_join_voice_request(message: str) -> bool:
-    return bool(_JOIN_VOICE_REQUEST_RE.search(message.strip()))
+    text = message.strip()
+    match = _JOIN_VOICE_REQUEST_RE.search(text)
+    if not match:
+        return False
+    verb_match = _JOIN_VOICE_VERB_RE.search(match.group())
+    if verb_match and _JOIN_VOICE_NEGATION_RE.search(text[: match.start() + verb_match.start()]):
+        return False
+    return True
 
 
 def text_claims_voice_join(text: str) -> bool:
@@ -411,22 +423,6 @@ class BaseChatbot(ABC):
         
         return True, None
 
-    def _enter_channel_succeeded(self, tool_calls_executed: List[Dict[str, Any]]) -> bool:
-        return any(
-            tc.get("tool") == "EnterChannel" and (tc.get("result") or {}).get("success")
-            for tc in tool_calls_executed
-        )
-
-    def _latest_user_voice_channel_result(
-        self, tool_calls_executed: List[Dict[str, Any]]
-    ) -> Optional[Dict[str, Any]]:
-        for tc in reversed(tool_calls_executed):
-            if tc.get("tool") == "GET_UserVoiceChannel":
-                result = tc.get("result")
-                if isinstance(result, dict):
-                    return result
-        return None
-
     async def _auto_enter_voice_if_needed(
         self,
         message: str,
@@ -435,9 +431,20 @@ class BaseChatbot(ABC):
         guild_id: Optional[int],
         user_id: Optional[int],
     ) -> None:
-        if not is_join_voice_request(message) or self._enter_channel_succeeded(tool_calls_executed):
+        if not is_join_voice_request(message):
             return
-        uvc = self._latest_user_voice_channel_result(tool_calls_executed)
+        if any(
+            tc.get("tool") == "EnterChannel" and (tc.get("result") or {}).get("success")
+            for tc in tool_calls_executed
+        ):
+            return
+        uvc = None
+        for tc in reversed(tool_calls_executed):
+            if tc.get("tool") == "GET_UserVoiceChannel":
+                result = tc.get("result")
+                if isinstance(result, dict):
+                    uvc = result
+                    break
         if not uvc or not uvc.get("in_voice_channel") or not uvc.get("channel_id"):
             return
         voice_guild_id = uvc.get("guild_id") or guild_id
@@ -463,7 +470,7 @@ class BaseChatbot(ABC):
             tool = tc.get("tool")
             result = tc.get("result") or {}
             if not result.get("success"):
-                continue
+                return None
             if tool in skip_override:
                 return None
             replier = terminal_tools.get(tool)
@@ -471,24 +478,17 @@ class BaseChatbot(ABC):
                 return replier(result)
         return None
 
-    def _finalize_tool_response(
+    def _resolve_tool_response(
         self,
-        content: Optional[str],
         tool_calls_executed: List[Dict[str, Any]],
+        content: Optional[str] = None,
+        send_mensagem_executed: bool = False,
     ) -> str:
         action_reply = self._derive_action_reply(tool_calls_executed)
         if action_reply:
             return action_reply
-        return (content or "").strip()
-
-    def _fallback_tool_response(
-        self,
-        tool_calls_executed: List[Dict[str, Any]],
-        send_mensagem_executed: bool,
-    ) -> str:
-        action_reply = self._derive_action_reply(tool_calls_executed)
-        if action_reply:
-            return action_reply
+        if content is not None:
+            return (content or "").strip()
         if send_mensagem_executed:
             return ""
         return "Ação executada."
@@ -782,9 +782,6 @@ class BaseChatbot(ABC):
         
         if not tool_result.get("success"):
             return f"Erro ao executar ação: {tool_result.get('error', 'Erro desconhecido')}", send_mensagem_executed
-        
-        if tool_name == "EnterChannel":
-            return self._derive_action_reply(tool_calls_executed) or "Ação executada com sucesso!", send_mensagem_executed
         if tool_name == "SEND_Mensagem":
             return " ".join(sent_message_texts) if sent_message_texts else "", send_mensagem_executed
         return "Ação executada com sucesso!", send_mensagem_executed
@@ -876,7 +873,10 @@ class BaseChatbot(ABC):
                             return "", tool_calls_executed
                         if tool_calls_executed:
                             return (
-                                self._fallback_tool_response(tool_calls_executed, send_mensagem_executed),
+                                self._resolve_tool_response(
+                                    tool_calls_executed,
+                                    send_mensagem_executed=send_mensagem_executed,
+                                ),
                                 tool_calls_executed,
                             )
                     if tool_calls_executed:
@@ -895,11 +895,24 @@ class BaseChatbot(ABC):
                     response_text, msg_executed = tool_call_result
                     if msg_executed:
                         send_mensagem_executed = True
-                    return response_text, tool_calls_executed
+                    await self._auto_enter_voice_if_needed(
+                        message, tool_calls_executed, app_functions or {}, guild_id, user_id
+                    )
+                    return (
+                        self._resolve_tool_response(
+                            tool_calls_executed,
+                            content=response_text,
+                            send_mensagem_executed=send_mensagem_executed,
+                        ),
+                        tool_calls_executed,
+                    )
                 
                 if any(marker in content_stripped.lower() for marker in ["</tool_call>", "<arg_key>", "<arg_value>", "<tool_call>"]):
                     return (
-                        self._fallback_tool_response(tool_calls_executed, send_mensagem_executed),
+                        self._resolve_tool_response(
+                            tool_calls_executed,
+                            send_mensagem_executed=send_mensagem_executed,
+                        ),
                         tool_calls_executed,
                     )
                 
@@ -909,16 +922,21 @@ class BaseChatbot(ABC):
                 if finish_reason == "stop":
                     if content_stripped:
                         extracted = self._extract_text_from_malformed_tool_call(content_stripped)
-                        final = self._finalize_tool_response(
-                            extracted if extracted else content_stripped,
+                        return (
+                            self._resolve_tool_response(
+                                tool_calls_executed,
+                                content=extracted if extracted else content_stripped,
+                            ),
                             tool_calls_executed,
                         )
-                        return final, tool_calls_executed
                     if send_mensagem_executed and sent_message_texts:
                         return " ".join(sent_message_texts), tool_calls_executed
                     if send_mensagem_executed or tool_calls_executed:
                         return (
-                            self._fallback_tool_response(tool_calls_executed, send_mensagem_executed),
+                            self._resolve_tool_response(
+                                tool_calls_executed,
+                                send_mensagem_executed=send_mensagem_executed,
+                            ),
                             tool_calls_executed,
                         )
                     return "Ação executada.", tool_calls_executed
@@ -927,11 +945,13 @@ class BaseChatbot(ABC):
                     if content_stripped:
                         logger.warning("Response truncated due to length limit")
                         extracted = self._extract_text_from_malformed_tool_call(content_stripped)
-                        final = self._finalize_tool_response(
-                            extracted if extracted else content_stripped,
+                        return (
+                            self._resolve_tool_response(
+                                tool_calls_executed,
+                                content=extracted if extracted else content_stripped,
+                            ),
                             tool_calls_executed,
                         )
-                        return final, tool_calls_executed
                     break
                 
                 if finish_reason == "tool_calls":
@@ -940,11 +960,13 @@ class BaseChatbot(ABC):
                 
                 if content_stripped:
                     extracted = self._extract_text_from_malformed_tool_call(content_stripped)
-                    final = self._finalize_tool_response(
-                        extracted if extracted else content_stripped,
+                    return (
+                        self._resolve_tool_response(
+                            tool_calls_executed,
+                            content=extracted if extracted else content_stripped,
+                        ),
                         tool_calls_executed,
                     )
-                    return final, tool_calls_executed
                 break
                 
             except Exception as e:
