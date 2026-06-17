@@ -136,7 +136,7 @@ class MusicBot:
                 sink = VoiceCommandSink(
                     self.bot, vc, guild_id,
                     getattr(self, 'zhipu_api_key', ''),
-                    getattr(self, 'whisper_provider', 'zhipu'),
+                    getattr(self, 'whisper_provider', 'sidecar'),
                     getattr(self, 'music_service', None),
                     getattr(self, 'chatbot', None),
                     getattr(self, 'tts_providers', {}),

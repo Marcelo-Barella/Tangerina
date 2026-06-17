@@ -131,10 +131,6 @@ class VoiceCommandSink(BaseSink):
     def wants_opus(self) -> bool:
         return False
 
-    def _extract_pcm(self, data: Any) -> Optional[bytes]:
-        pcm = getattr(data, 'pcm', None)
-        return pcm if pcm else None
-
     def _has_speech_energy(self, pcm_audio: bytes) -> bool:
         try:
             import audioop
@@ -163,7 +159,7 @@ class VoiceCommandSink(BaseSink):
             packet = getattr(data, 'packet', None)
             if packet is not None and getattr(packet, 'decrypted_data', None) == OPUS_SILENCE:
                 return
-            pcm = self._extract_pcm(data)
+            pcm = getattr(data, 'pcm', None)
             if pcm:
                 if user.id not in self.audio_buffers:
                     self.audio_buffers[user.id] = deque(maxlen=AUDIO_BUFFER_MAXLEN)
@@ -328,7 +324,7 @@ class VoiceCommandSink(BaseSink):
             result = await asyncio.to_thread(
                 model.transcribe,
                 tmp_file_path,
-                language="pt",
+                language=DEFAULT_WHISPER_LANGUAGE or None,
                 initial_prompt=WHISPER_INITIAL_PROMPT,
             )
             text = result.get('text', '').strip()
