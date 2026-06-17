@@ -56,6 +56,38 @@ class TestOmnivoiceServerHealth:
         assert response.get_json()["status"] == "error"
         assert "CUDA unavailable" in response.get_json()["error"]
 
+    def test_blocked_check_preserves_newer_hung_thread_during_stale_cleanup(self, server):
+        dead_thread = threading.Thread(target=lambda: None)
+        dead_thread.start()
+        dead_thread.join()
+
+        live_release = threading.Event()
+        live_started = threading.Event()
+
+        def live_hang() -> None:
+            live_started.set()
+            live_release.wait(timeout=5)
+
+        live_thread = threading.Thread(target=live_hang)
+        original_is_alive = threading.Thread.is_alive
+
+        def is_alive_with_race(self):
+            if self is dead_thread:
+                live_thread.start()
+                assert live_started.wait(timeout=1)
+                server._hung_inference_thread = live_thread
+            return original_is_alive(self)
+
+        server._hung_inference_thread = dead_thread
+        with patch.object(threading.Thread, "is_alive", is_alive_with_race):
+            assert server._blocked_by_hung_inference() is False
+
+        assert server._hung_inference_thread is live_thread
+        assert server._blocked_by_hung_inference() is True
+
+        live_release.set()
+        live_thread.join(timeout=2)
+
     def test_health_returns_503_while_recovering_from_hung_inference(self, server):
         hang_started = threading.Event()
         hang_release = threading.Event()

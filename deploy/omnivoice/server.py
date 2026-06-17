@@ -25,6 +25,7 @@ _model_ready = False
 _model_lock = threading.Lock()
 _load_error: Optional[str] = None
 _hung_inference_thread: Optional[threading.Thread] = None
+_hung_inference_lock = threading.Lock()
 _DEFAULT_INSTRUCT = "female, portuguese accent"
 
 
@@ -73,12 +74,21 @@ def _inference_timeout_seconds() -> int:
 
 def _blocked_by_hung_inference() -> bool:
     global _hung_inference_thread
-    if _hung_inference_thread is None:
-        return False
-    if not _hung_inference_thread.is_alive():
-        _hung_inference_thread = None
-        return False
-    return True
+    with _hung_inference_lock:
+        ref = _hung_inference_thread
+        if ref is None:
+            return False
+        if not ref.is_alive():
+            if _hung_inference_thread is ref:
+                _hung_inference_thread = None
+            return False
+        return True
+
+
+def _track_hung_inference(thread: threading.Thread) -> None:
+    global _hung_inference_thread
+    with _hung_inference_lock:
+        _hung_inference_thread = thread
 
 
 def _generate_audio(text: str):
@@ -176,8 +186,7 @@ def tts() -> Tuple[Response, int] | Response:
             try:
                 audio = _generate_audio_timed(text)
             except InferenceTimeout as exc:
-                global _hung_inference_thread
-                _hung_inference_thread = exc.thread
+                _track_hung_inference(exc.thread)
                 logger.error(
                     "TTS inference timed out after %ss; blocking new requests until thread exits",
                     _inference_timeout_seconds(),
