@@ -2,8 +2,6 @@ import logging
 from typing import Any, Callable, Tuple
 logger = logging.getLogger(__name__)
 _patched = False
-def _decode_with_fec(decoder: Any, packet_data: bytes) -> bytes:
-    return decoder.decode(packet_data, fec=True)
 def _decode_plc(decoder: Any) -> bytes | None:
     try:
         return decoder.decode(None, fec=False)
@@ -11,7 +9,7 @@ def _decode_plc(decoder: Any) -> bytes | None:
         return None
 def _recover_opus_decode(decoder: Any, packet_data: bytes, exc: Exception, ssrc: Any) -> bytes:
     try:
-        return _decode_with_fec(decoder, packet_data)
+        return decoder.decode(packet_data, fec=True)
     except Exception:
         pcm = _decode_plc(decoder)
         if pcm:

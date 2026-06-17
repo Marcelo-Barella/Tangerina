@@ -32,10 +32,6 @@ _local_model = None
 _transcribe_lock = threading.Lock()
 
 
-def _use_openai_api() -> bool:
-    return bool(OPENAI_API_KEY)
-
-
 def _get_openai_client():
     global _openai_client
     if _openai_client is None:
@@ -64,7 +60,7 @@ def _transcribe_local(tmp_path: str, language: str | None, prompt: str) -> str:
 
 @app.route("/health", methods=["GET"])
 def health():
-    if _use_openai_api():
+    if OPENAI_API_KEY:
         return jsonify({"status": "ok", "provider": "openai-api"}), 200
     if whisper is None:
         return jsonify({"status": "error", "error": "No transcription backend available"}), 503
@@ -86,7 +82,7 @@ def transcribe():
         language_param = WHISPER_LANGUAGE if WHISPER_LANGUAGE else None
         prompt = (request.form.get("prompt") or WHISPER_INITIAL_PROMPT or "").strip()
         with _transcribe_lock:
-            if _use_openai_api():
+            if OPENAI_API_KEY:
                 with open(tmp_path, "rb") as audio_file:
                     text_response = transcribe_openai_whisper(
                         _get_openai_client(),
@@ -110,7 +106,7 @@ def transcribe():
 
 
 if __name__ == "__main__":
-    if _use_openai_api():
+    if OPENAI_API_KEY:
         logger.info("Whisper sidecar using OpenAI Whisper API (whisper-1)")
     else:
         logger.warning(
