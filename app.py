@@ -77,10 +77,17 @@ def _openai_api_key_from_env() -> Optional[str]:
     return key.strip()
 
 
+def _openai_base_url_from_env() -> Optional[str]:
+    base_url = (os.getenv('OPENAI_BASE_URL') or '').strip()
+    return base_url or None
+
+
 def _whisper_provider_from_env(openai_api_key: Optional[str]) -> str:
     configured = os.getenv('WHISPER_PROVIDER')
     if configured is not None and configured.strip():
         return configured.strip()
+    if _openai_base_url_from_env():
+        return 'sidecar'
     if openai_api_key:
         return 'openai-api'
     return 'sidecar'
@@ -177,6 +184,7 @@ if create_omnivoice_client and (
 
 music_bot.chatbot = chatbot
 music_bot.tts_providers = tts_providers
+music_bot.tts_provider = TTS_PROVIDER
 
 async def speak_tts(guild_id: int, channel_id: int, text: str, provider: Optional[str] = None) -> Dict[str, Any]:
     return await speak_tts_unified(

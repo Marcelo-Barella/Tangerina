@@ -165,3 +165,13 @@ class TestAppWhisperProvider:
             }
         )
         assert app_module.music_bot.whisper_provider == "zhipu"
+
+    def test_defaults_to_sidecar_when_openai_base_url_set(self):
+        app_module = _reload_app(
+            {
+                "DISCORD_BOT_TOKEN": "test-token",
+                "OPENAI_API_KEY": "ollama",
+                "OPENAI_BASE_URL": "http://127.0.0.1:11434/v1",
+            }
+        )
+        assert app_module.music_bot.whisper_provider == "sidecar"
