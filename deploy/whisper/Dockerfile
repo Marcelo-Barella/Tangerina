@@ -11,16 +11,21 @@ ENV PYTHONPATH=/app
 ENV XDG_CACHE_HOME=/app/.cache
 ENV WHISPER_MODEL=base
 ENV WHISPER_LANGUAGE=pt
+ENV WHISPER_LOCAL_ENGINE=faster-whisper
+ENV WHISPER_DEVICE=cpu
+ENV WHISPER_COMPUTE_TYPE=int8
 
 RUN pip install --no-cache-dir \
     flask \
     openai \
+    faster-whisper \
     openai-whisper
 
 COPY features/voice/openai_whisper_api.py /app/features/voice/openai_whisper_api.py
 COPY deploy/whisper/server.py /app/server.py
 COPY deploy/whisper/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/server.py /app/entrypoint.sh
+RUN mkdir -p /app/features/voice && touch /app/features/voice/__init__.py /app/features/__init__.py
 
 EXPOSE 5002
 

@@ -1,5 +1,8 @@
 version: '3.8'
 
+# Whisper vars come from ../../.env (env_file) and Dockerfile defaults.
+# Do not list OPENAI_BASE_URL / WHISPER_USE_OPENAI_API / WHISPER_LOCAL_ENGINE here:
+# empty ${VAR:-} host substitution would clear values loaded from env_file.
 services:
   whisper-asr:
     build:
@@ -10,8 +13,6 @@ services:
     env_file:
       - ../../.env
     environment:
-      - WHISPER_MODEL=${WHISPER_MODEL:-base}
-      - WHISPER_LANGUAGE=${WHISPER_LANGUAGE:-pt}
       - WHISPER_PORT=5002
       - XDG_CACHE_HOME=/app/.cache
     ports:
@@ -32,5 +33,3 @@ services:
 networks:
   tangerina-network:
     external: true
-
-
