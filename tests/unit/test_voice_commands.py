@@ -8,7 +8,6 @@ from features.voice.voice_commands import (
     VOLUME_MIN,
     VOLUME_MAX,
     LISTENING_DURATION,
-    WHISPER_INITIAL_PROMPT,
     VoiceCommandSink,
 )
 from tests.conftest import TEST_GUILD_ID
@@ -184,6 +183,22 @@ class TestVoiceCommandSinkSpeechRouting:
         await sink._route_speech(mock_member, "tangerina toca música")
         
         sink._handle_voice_command.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_route_speech_accepts_wake_alias(self, sink_instance):
+        sink, _, _, _ = sink_instance
+        sink._handle_voice_command = AsyncMock()
+        mock_member = MagicMock(spec=discord.Member)
+        await sink._route_speech(mock_member, "tancarina toca everlong")
+        sink._handle_voice_command.assert_called_once_with(mock_member, "toca everlong")
+
+    @pytest.mark.asyncio
+    async def test_route_speech_ignores_without_wake_word(self, sink_instance):
+        sink, _, _, _ = sink_instance
+        sink._handle_voice_command = AsyncMock()
+        mock_member = MagicMock(spec=discord.Member)
+        await sink._route_speech(mock_member, "toca everlong")
+        sink._handle_voice_command.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_route_speech_activates_listening_mode(self, sink_instance):
@@ -384,7 +399,6 @@ class TestVoiceCommandSinkAudioCombining:
     def test_combine_audio_chunks_creates_mono_audio(self, sink_instance):
         sink, _, _, _ = sink_instance
         
-        import io
         import wave
         chunks = [b'\x00\x01' * 100]
         result = sink._combine_audio_chunks(chunks)
@@ -392,6 +406,43 @@ class TestVoiceCommandSinkAudioCombining:
         result.seek(0)
         with wave.open(result, 'rb') as wav_file:
             assert wav_file.getnchannels() == 1
+            assert wav_file.getframerate() == 16000
+
+    def test_resample_mono_pcm_without_audioop(self):
+        import sys
+        import struct
+        from features.voice import voice_commands as vc
+
+        pcm_48k = struct.pack(f'<{4800}h', *([1000] * 4800))
+        mock_audioop = MagicMock()
+        mock_audioop.ratecv.side_effect = AttributeError('removed')
+        with patch.dict(sys.modules, {'audioop': mock_audioop}):
+            out = vc._resample_mono_pcm(pcm_48k, 48000, 16000)
+        assert len(out) // 2 == 1600
+        assert len(out) % 2 == 0
+
+    def test_split_tts_sentences(self, sink_instance):
+        sink, _, _, _ = sink_instance
+        assert sink._split_tts_sentences("Oi. Tudo bem? Sim!") == ["Oi.", "Tudo bem?", "Sim!"]
+        assert sink._split_tts_sentences("uma frase") == ["uma frase"]
+
+    @pytest.mark.asyncio
+    async def test_speak_response_uses_configured_tts_provider(self, sink_instance):
+        sink, _, _, mock_music_service = sink_instance
+        sink.tts_provider = 'omnivoice'
+        sink.tts_providers = {'omnivoice': MagicMock()}
+        sink.speak_tts_func = AsyncMock()
+        mock_vc = MagicMock()
+        mock_vc.is_connected.return_value = True
+        mock_vc.is_playing.return_value = False
+        mock_vc.channel.id = 42
+        mock_music_service.music_bot.voice_clients = {TEST_GUILD_ID: mock_vc}
+
+        await sink._speak_response_if_enabled("Olá. Mundo.")
+
+        assert sink.speak_tts_func.await_count == 2
+        sink.speak_tts_func.assert_any_await(TEST_GUILD_ID, 42, "Olá.", "omnivoice")
+        sink.speak_tts_func.assert_any_await(TEST_GUILD_ID, 42, "Mundo.", "omnivoice")
 
 
 @pytest.mark.unit
@@ -642,7 +693,7 @@ class TestVoiceCommandSinkTranscriptionProviders:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_transcribe_sidecar_sends_initial_prompt(self, sink_instance):
+    async def test_transcribe_sidecar_omits_empty_prompt(self, sink_instance):
         sink, _, _, _ = sink_instance
         captured = {}
 
@@ -663,10 +714,11 @@ class TestVoiceCommandSinkTranscriptionProviders:
                 mock_post_cm.__aexit__ = AsyncMock(return_value=None)
                 mock_session.return_value.__aenter__.return_value.post = MagicMock(return_value=mock_post_cm)
 
-                result = await sink._transcribe_sidecar(audio_data)
+                with patch('features.voice.voice_commands.WHISPER_INITIAL_PROMPT', ''):
+                    result = await sink._transcribe_sidecar(audio_data)
 
         assert result == 'toca música'
-        assert captured['prompt'] == WHISPER_INITIAL_PROMPT
+        assert 'prompt' not in captured
         assert captured['file'] == b'RIFF'
 
     @pytest.mark.asyncio

@@ -17,28 +17,123 @@ logger = logging.getLogger(__name__)
 MIN_AUDIO_CHUNKS = 10
 MIN_PCM_BYTES = MIN_AUDIO_CHUNKS * 3840
 MIN_SPEECH_RMS = 300
+MIN_STT_DURATION_S = 0.6
+MAX_TRANSCRIPT_CHARS_PER_S = 28
 QUEUE_DISPLAY_LIMIT = 5
 VOLUME_MIN = 0
 VOLUME_MAX = 100
 WAKE_WORD = 'tangerina'
+WAKE_WORD_ALIASES = (
+    'tangerina',
+    'tanger ina',
+    'tangarina',
+    'tancarina',
+    'tangerine',
+    'tangerinna',
+)
+HALLUCINATION_MARKERS = (
+    'amara.org',
+    'legendas pela comunidade',
+    'se inscreva no canal',
+    'ative o sininho',
+    'ativar as notifica',
+    'subscribe to',
+    'like and subscribe',
+    'próximo vídeo',
+    'proximo video',
+)
 OPUS_SILENCE = b'\xf8\xff\xfe'
 LISTENING_DURATION = 5.0
 CANCEL_KEYWORDS = ['cancel', 'cancelar', 'stop', 'parar', 'nevermind', 'esquece']
 AUDIO_BUFFER_MAXLEN = 150
-AUDIO_SAMPLE_RATE = 48000
+CAPTURE_SAMPLE_RATE = 48000
+STT_SAMPLE_RATE = 16000
 AUDIO_SAMPLE_WIDTH = 2
 AUDIO_CHANNELS = 1
 LISTENING_VOLUME = 20
 CONNECTION_HEALTH_CHECK_INTERVAL = 5.0
 CONNECTION_TIMEOUT = 10.0
-WHISPER_INITIAL_PROMPT = os.getenv(
-    'WHISPER_INITIAL_PROMPT',
-    (
-        'Transcreva em português brasileiro. Comandos de voz para o assistente musical Tangerina: '
-        'toca a música, para a música, pula a música, pausa a música, continua a música, '
-        'fila de música, volume, tangerina.'
-    ),
-)
+WHISPER_MODEL = os.getenv('WHISPER_MODEL', 'base')
+WHISPER_INITIAL_PROMPT = (os.getenv('WHISPER_INITIAL_PROMPT') or '').strip()
+TTS_SENTENCE_SPLIT_RE = re.compile(r'(?<=[.!?…])\s+|\n+')
+
+def _is_plausible_transcript(text: str, duration_s: float) -> bool:
+    cleaned = (text or '').strip()
+    if not cleaned:
+        return False
+    if duration_s < MIN_STT_DURATION_S:
+        return False
+    max_chars = max(24, int(duration_s * MAX_TRANSCRIPT_CHARS_PER_S))
+    return len(cleaned) <= max_chars
+
+def _is_noise_hallucination(text: str) -> bool:
+    cleaned = (text or '').strip()
+    if not cleaned:
+        return True
+    letters = re.sub(r'[^\w]+', '', cleaned, flags=re.UNICODE)
+    if not letters:
+        return True
+    lower = cleaned.lower()
+    if any(marker in lower for marker in HALLUCINATION_MARKERS):
+        return True
+    tokens = re.findall(r'[\wÀ-ÿ]+', lower)
+    if len(tokens) >= 4:
+        unique = set(tokens)
+        if len(unique) <= 2:
+            return True
+    return False
+
+def _find_wake_word(text_lower: str) -> Optional[tuple]:
+    best = None
+    for alias in WAKE_WORD_ALIASES:
+        idx = text_lower.find(alias)
+        if idx < 0:
+            continue
+        if best is None or idx < best[0] or (idx == best[0] and len(alias) > best[1]):
+            best = (idx, len(alias), alias)
+    return best
+
+def _pcm_stereo_to_mono(pcm: bytes) -> bytes:
+    try:
+        import audioop
+        return audioop.tomono(pcm, AUDIO_SAMPLE_WIDTH, 1.0, 1.0)
+    except (ImportError, AttributeError):
+        stereo_samples = struct.unpack(f'<{len(pcm) // 2}h', pcm)
+        mono_samples = [
+            (stereo_samples[i] + stereo_samples[i + 1]) // 2
+            for i in range(0, len(stereo_samples) - 1, 2)
+        ]
+        return struct.pack(f'<{len(mono_samples)}h', *mono_samples)
+
+def _resample_mono_pcm(mono_pcm: bytes, from_rate: int, to_rate: int) -> bytes:
+    if from_rate == to_rate or not mono_pcm:
+        return mono_pcm
+    try:
+        import audioop
+        converted, _ = audioop.ratecv(
+            mono_pcm,
+            AUDIO_SAMPLE_WIDTH,
+            AUDIO_CHANNELS,
+            from_rate,
+            to_rate,
+            None,
+        )
+        return converted
+    except (ImportError, AttributeError):
+        sample_count = len(mono_pcm) // AUDIO_SAMPLE_WIDTH
+        if sample_count < 2:
+            return mono_pcm
+        samples = struct.unpack(f'<{sample_count}h', mono_pcm)
+        out_count = max(1, int(round(sample_count * to_rate / from_rate)))
+        out = []
+        for i in range(out_count):
+            src = i * (sample_count - 1) / (out_count - 1)
+            left = int(src)
+            right = min(left + 1, sample_count - 1)
+            frac = src - left
+            value = int(samples[left] * (1.0 - frac) + samples[right] * frac)
+            out.append(max(-32768, min(32767, value)))
+        return struct.pack(f'<{len(out)}h', *out)
 
 try:
     from discord.ext import voice_recv
@@ -60,6 +155,7 @@ from features.voice.openai_whisper_api import (
     build_openai_whisper_client,
     transcribe_openai_whisper,
 )
+from features.voice.stt_flight import SttFailureEvent, SttFailureKind, SttFlight
 
 try:
     import whisper
@@ -88,7 +184,8 @@ class VoiceCommandSink(BaseSink):
         chatbot: Optional[Any] = None,
         tts_providers: Optional[Dict[str, Any]] = None,
         speak_tts_func: Optional[Callable] = None,
-        openai_api_key: Optional[str] = None
+        openai_api_key: Optional[str] = None,
+        tts_provider: Optional[str] = None,
     ):
         if voice_recv:
             super().__init__()
@@ -106,6 +203,7 @@ class VoiceCommandSink(BaseSink):
         self.chatbot = chatbot
         self.tts_providers = tts_providers or {}
         self.speak_tts_func = speak_tts_func
+        self.tts_provider = (tts_provider or os.getenv('TTS_PROVIDER') or 'elevenlabs').strip().lower()
         self.listening_mode: Dict[int, bool] = {}
         self.listening_tasks: Dict[int, asyncio.Task] = {}
         self.original_volumes: Dict[int, float] = {}
@@ -116,6 +214,8 @@ class VoiceCommandSink(BaseSink):
         self._health_monitor_started: bool = False
         self._transcribe_lock = asyncio.Lock()
         self._openai_whisper_client = None
+        if not hasattr(self, "_stt_flight"):
+            self._stt_flight = SttFlight()
         self._validate_provider_config()
 
     def _validate_provider_config(self) -> None:
@@ -169,7 +269,8 @@ class VoiceCommandSink(BaseSink):
             if pcm:
                 if user.id not in self.audio_buffers:
                     self.audio_buffers[user.id] = deque(maxlen=AUDIO_BUFFER_MAXLEN)
-                self.audio_buffers[user.id].append(pcm)
+                buf = self.audio_buffers[user.id]
+                buf.append(pcm)
                 self.last_audio_timestamps[user.id] = time.time()
         except OpusError as e:
             logger.error(f"OpusError in write() for user {user.id if user else None}: {e}")
@@ -205,14 +306,34 @@ class VoiceCommandSink(BaseSink):
         self.audio_buffers[member.id].clear()
         if len(audio_chunks) < MIN_AUDIO_CHUNKS:
             return
-        combined_pcm = b''.join(audio_chunks)
-        if len(combined_pcm) < MIN_PCM_BYTES or not self._has_speech_energy(combined_pcm):
+        if len(combined_pcm) < MIN_PCM_BYTES or not energy_ok:
             return
         try:
             audio_data = self._combine_audio_chunks(audio_chunks)
+            with wave.open(audio_data, 'rb') as wav_reader:
+                nframes = wav_reader.getnframes()
+                framerate = wav_reader.getframerate()
+                nchannels = wav_reader.getnchannels()
+                sampwidth = wav_reader.getsampwidth()
+                duration_s = nframes / float(framerate or STT_SAMPLE_RATE)
+            audio_data.seek(0)
+            if duration_s < MIN_STT_DURATION_S:
+                return
+            t0 = time.monotonic()
             async with self._transcribe_lock:
                 text = await self._transcribe_audio(audio_data)
+            elapsed_ms = round((time.monotonic() - t0) * 1000, 1)
             if not text or not text.strip():
+                return
+            if not _is_plausible_transcript(text, duration_s):
+                logger.info(
+                    "Ignoring implausible transcript from %s (%.2fs, %d chars)",
+                    member.display_name,
+                    duration_s,
+                    len(text.strip()),
+                )
+                return
+            if _is_noise_hallucination(text):
                 return
             logger.info(f"Transcribed from {member.display_name}: {text}")
             await self._route_speech(member, text.strip())
@@ -222,12 +343,13 @@ class VoiceCommandSink(BaseSink):
     async def _route_speech(self, member: discord.Member, text: str) -> None:
         text_lower = text.lower().strip()
         is_listening = self.listening_mode.get(member.id, False)
-        
-        if WAKE_WORD in text_lower:
-            wake_word_index = text_lower.find(WAKE_WORD)
-            command_text = text[wake_word_index + len(WAKE_WORD):].strip()
+        wake = _find_wake_word(text_lower)
+
+        if wake is not None:
+            wake_word_index, wake_len, _alias = wake
+            command_text = text[wake_word_index + wake_len:].strip()
             command_text = re.sub(r'^[,.\s]+', '', command_text)
-            
+
             if command_text and not is_listening:
                 await self._handle_voice_command(member, command_text)
             elif not is_listening:
@@ -236,24 +358,16 @@ class VoiceCommandSink(BaseSink):
                 await self._handle_listening_mode(member, text.strip())
         elif is_listening:
             await self._handle_listening_mode(member, text.strip())
-        else:
-            await self._handle_voice_command(member, text.strip())
 
     def _combine_audio_chunks(self, chunks: List[bytes]) -> io.BytesIO:
         combined = b''.join(chunks)
-        try:
-            import audioop
-            mono_audio = audioop.tomono(combined, 2, 1.0, 1.0)
-        except (ImportError, AttributeError):
-            stereo_samples = struct.unpack(f'<{len(combined)//2}h', combined)
-            mono_samples = [(stereo_samples[i] + stereo_samples[i + 1]) // 2
-                          for i in range(0, len(stereo_samples) - 1, 2)]
-            mono_audio = struct.pack(f'<{len(mono_samples)}h', *mono_samples)
+        mono_audio = _pcm_stereo_to_mono(combined)
+        mono_audio = _resample_mono_pcm(mono_audio, CAPTURE_SAMPLE_RATE, STT_SAMPLE_RATE)
         wav_buffer = io.BytesIO()
         with wave.open(wav_buffer, 'wb') as wav_file:
             wav_file.setnchannels(AUDIO_CHANNELS)
             wav_file.setsampwidth(AUDIO_SAMPLE_WIDTH)
-            wav_file.setframerate(AUDIO_SAMPLE_RATE)
+            wav_file.setframerate(STT_SAMPLE_RATE)
             wav_file.writeframes(mono_audio)
         wav_buffer.seek(0)
         return wav_buffer
@@ -265,8 +379,8 @@ class VoiceCommandSink(BaseSink):
             logger.error("openai-whisper package not available")
             return None
         try:
-            logger.info("Loading Whisper model (medium) for Portuguese transcription...")
-            self.whisper_model = whisper.load_model("medium")
+            logger.info("Loading Whisper model (%s) for Portuguese transcription...", WHISPER_MODEL)
+            self.whisper_model = whisper.load_model(WHISPER_MODEL)
             logger.info("Whisper model loaded successfully")
             return self.whisper_model
         except Exception as e:
@@ -300,6 +414,7 @@ class VoiceCommandSink(BaseSink):
             return None
         try:
             audio_data.seek(0)
+            t0 = time.monotonic()
             text = await asyncio.to_thread(
                 transcribe_openai_whisper,
                 self._get_openai_whisper_client(),
@@ -325,6 +440,7 @@ class VoiceCommandSink(BaseSink):
             with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_file:
                 tmp_file.write(audio_data.read())
                 tmp_file_path = tmp_file.name
+            t0 = time.monotonic()
             result = await asyncio.to_thread(
                 model.transcribe,
                 tmp_file_path,
@@ -339,27 +455,48 @@ class VoiceCommandSink(BaseSink):
         finally:
             self._cleanup_temp_file(tmp_file_path)
 
+    def _record_stt_failure(self, kind: SttFailureKind, detail: str) -> None:
+        self._stt_flight.record(SttFailureEvent(
+            kind=kind,
+            provider="sidecar",
+            detail=detail[:200],
+            at_epoch_s=time.time(),
+        ))
+
     async def _transcribe_sidecar(self, audio_data: io.BytesIO) -> Optional[str]:
         audio_data.seek(0)
         audio_bytes = audio_data.read()
         url = f"{self.whisper_api_url.rstrip('/')}/transcribe"
         data = aiohttp.FormData()
         data.add_field('file', audio_bytes, filename='audio.wav', content_type='audio/wav')
-        data.add_field('prompt', WHISPER_INITIAL_PROMPT)
+        if WHISPER_INITIAL_PROMPT:
+            data.add_field('prompt', WHISPER_INITIAL_PROMPT)
         try:
+            t0 = time.monotonic()
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, data=data, timeout=aiohttp.ClientTimeout(total=TRANSCRIPTION_TIMEOUT)) as response:
                     if response.status == 200:
                         result = await response.json()
                         text = result.get('text', '').strip()
-                        return text if text else None
+                        if text:
+                            return text
+                        self._record_stt_failure(SttFailureKind.EMPTY, "empty transcript")
+                        return None
                     error_text = await response.text()
+                    kind = SttFailureKind.HTTP_500 if response.status == 500 else SttFailureKind.HTTP_OTHER
+                    self._record_stt_failure(kind, f"HTTP {response.status} - {error_text}")
                     logger.error(f"Whisper sidecar transcription error: HTTP {response.status} - {error_text}")
                     return None
         except asyncio.TimeoutError:
+            self._record_stt_failure(SttFailureKind.TIMEOUT, "timeout")
             logger.error("Whisper sidecar transcription timeout")
             return None
+        except aiohttp.ClientConnectorError as e:
+            self._record_stt_failure(SttFailureKind.UNREACHABLE, str(e))
+            logger.error(f"Whisper sidecar transcription error: {e}")
+            return None
         except Exception as e:
+            self._record_stt_failure(SttFailureKind.UNKNOWN, str(e))
             logger.error(f"Whisper sidecar transcription error: {e}")
             return None
 
@@ -375,6 +512,7 @@ class VoiceCommandSink(BaseSink):
         data.add_field('stream', 'false')
         data.add_field('file', audio_bytes, filename='audio.wav', content_type='audio/wav')
         try:
+            t0 = time.monotonic()
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, headers=headers, data=data, timeout=aiohttp.ClientTimeout(total=TRANSCRIPTION_TIMEOUT)) as response:
                     if response.status == 200:
@@ -427,6 +565,8 @@ class VoiceCommandSink(BaseSink):
 
     async def _handle_play(self, channel: discord.TextChannel, text: str) -> None:
         query = re.sub(r'\b(toca|play|tocar)\b', '', text).strip()
+        query = re.sub(r'^(a\s+)?m[uú]sica\s+', '', query).strip()
+        query = re.sub(r'^[,.\s]+', '', query).strip()
         if not query:
             return
         try:
@@ -559,12 +699,35 @@ class VoiceCommandSink(BaseSink):
         )
         return response
 
+    def _tts_provider_ready(self) -> bool:
+        if not self.speak_tts_func:
+            return False
+        if self.tts_provider == 'elevenlabs':
+            return bool(self.tts_providers.get('elevenlabs'))
+        return bool(self.tts_providers.get(self.tts_provider))
+
+    @staticmethod
+    def _split_tts_sentences(text: str) -> List[str]:
+        parts = [part.strip() for part in TTS_SENTENCE_SPLIT_RE.split(text.strip()) if part.strip()]
+        return parts if parts else ([text.strip()] if text.strip() else [])
+
+    async def _wait_voice_playback_idle(self) -> None:
+        voice_client = self.music_service.music_bot.voice_clients.get(self.guild_id)
+        if not voice_client:
+            return
+        while voice_client.is_connected() and voice_client.is_playing():
+            await asyncio.sleep(0.1)
+
     async def _speak_response_if_enabled(self, response: str) -> None:
-        if 'piper' not in self.tts_providers or not self.tts_providers['piper'] or not self.speak_tts_func:
+        if not self._tts_provider_ready():
             return
         voice_client = self.music_service.music_bot.voice_clients.get(self.guild_id)
-        if voice_client and voice_client.is_connected():
-            await self.speak_tts_func(self.guild_id, voice_client.channel.id, response, 'piper')
+        if not voice_client or not voice_client.is_connected():
+            return
+        channel_id = voice_client.channel.id
+        for sentence in self._split_tts_sentences(response):
+            await self.speak_tts_func(self.guild_id, channel_id, sentence, self.tts_provider)
+            await self._wait_voice_playback_idle()
 
     def _start_health_monitor(self) -> None:
         if self._health_monitor_started:
