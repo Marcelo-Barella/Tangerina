@@ -1,0 +1,12 @@
+# Local-model proof override. From deploy/whisper:
+#   docker compose -f docker-compose.yml -f docker-compose.model-test.yml up -d --build
+# Forces empty OPENAI_API_KEY and WHISPER_MODEL=tiny so PROVEN means local faster-whisper.
+services:
+  whisper-asr:
+    environment:
+      - OPENAI_API_KEY=
+      - OPENAI_BASE_URL=
+      - WHISPER_USE_OPENAI_API=0
+      - WHISPER_MODEL=tiny
+      - WHISPER_LANGUAGE=pt
+      - WHISPER_LOCAL_ENGINE=faster-whisper
