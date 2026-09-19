@@ -79,7 +79,7 @@ async def test_try_route_music_stop(router_with_key):
             chatbot, "para a musica", guild_id=10, channel_id=20, user_id=30, app_functions={}
         )
 
-    assert text == "Música parada"
+    assert text == "Ação executada."
     assert tool_calls[0]["tool"] == "MusicStop"
     chatbot._call_tool.assert_awaited_once()
 

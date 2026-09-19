@@ -66,9 +66,9 @@ def derive_action_reply(
         result = tc.get("result") or {}
         if _tool_failed(result):
             continue
-        if tool == "GET_MusicQueue":
+        if for_fallback and tool == "GET_MusicQueue":
             return _format_music_queue_reply(result)
-        if tool == "WebSearch":
+        if for_fallback and tool == "WebSearch":
             return _format_web_search_reply(result)
         if tool in _SKIP_OVERRIDE_TOOLS:
             if for_fallback:

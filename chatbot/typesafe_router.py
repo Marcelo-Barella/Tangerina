@@ -59,7 +59,10 @@ def _noul_answer(result: Any, key: str) -> Tuple[float, float]:
     if answer is None:
         return 0.0, 0.0
     noul = float(getattr(answer, "noul", 0.0) or 0.0)
-    confidence = float(getattr(answer, "confidence", 0.0) or 0.0)
+    if hasattr(answer, "confidence"):
+        confidence = float(getattr(answer, "confidence", 0.0) or 0.0)
+    else:
+        confidence = max(noul, 1.0 - noul)
     return noul, confidence
 
 
@@ -214,8 +217,6 @@ class TypeSafeToolRouter:
             err = tool_result.get("error", "Erro desconhecido")
             return f"Erro ao executar ação: {err}", tool_calls_executed
 
-        if tool_result.get("message"):
-            return str(tool_result["message"]), tool_calls_executed
         return resolve_tool_response(tool_calls_executed), tool_calls_executed
 
     async def _resolve_voice_channel_id(

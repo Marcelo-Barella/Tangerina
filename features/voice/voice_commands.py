@@ -271,12 +271,10 @@ class VoiceCommandSink(BaseSink):
                         return
                     if decision.wake_for_conversation:
                         command_text = self._strip_wake_word(text, text_lower, wake_present)
-                        if command_text:
-                            await self._handle_voice_command(member, command_text)
+                        if not command_text:
+                            await self._activate_listening_mode(member)
                             return
-                        await self._activate_listening_mode(member)
-                        return
-                    await self._handle_voice_command(member, text.strip())
+                    await self._handle_listening_mode(member, text.strip())
                     return
 
         if wake_present:
