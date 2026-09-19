@@ -2,10 +2,20 @@ from typing import Any, Dict, List, Optional
 
 from features.discord.chatbot_reply import _SUPPRESSED_RESPONSES
 
+def _result_message(result: Dict[str, Any], default: str) -> str:
+    message = (result.get("message") or "").strip()
+    return message or default
+
+
 _TERMINAL_TOOL_REPLIES = {
     "EnterChannel": lambda r: f"Pronto, entrei no {r.get('channel_name') or 'canal de voz'}!",
     "LeaveChannel": lambda _: "Saí do canal de voz.",
     "MusicLeave": lambda _: "Saí do canal de voz.",
+    "MusicStop": lambda r: _result_message(r, "Música parada."),
+    "MusicSkip": lambda r: _result_message(r, "Música pulada."),
+    "MusicPause": lambda r: _result_message(r, "Música pausada."),
+    "MusicResume": lambda r: _result_message(r, "Música retomada."),
+    "MusicVolume": lambda r: _result_message(r, "Volume ajustado."),
 }
 _SKIP_OVERRIDE_TOOLS = frozenset({
     "MusicPlay", "MusicSpotifyPlay", "SEND_Mensagem", "TTSSpeak",
@@ -77,6 +87,12 @@ def derive_action_reply(
         replier = _TERMINAL_TOOL_REPLIES.get(tool)
         if replier:
             return replier(result)
+    if for_fallback:
+        for tc in reversed(tool_calls_executed):
+            tool = tc.get("tool")
+            result = tc.get("result") or {}
+            if tool == "MusicPlay" and not _tool_failed(result):
+                return _result_message(result, "Tocando música.")
     return None
 
 

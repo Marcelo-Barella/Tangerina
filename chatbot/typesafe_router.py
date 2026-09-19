@@ -66,12 +66,12 @@ def _noul_answer(result: Any, key: str) -> Tuple[float, float]:
     return noul, confidence
 
 
-def _score_answer(result: Any, key: str) -> Tuple[int, float]:
+def _score_answer(result: Any, key: str) -> Tuple[float, float]:
     scores = getattr(result, "scores", None) or {}
     answer = scores.get(key)
     if answer is None:
-        return 0, 0.0
-    score = int(getattr(answer, "score", 0) or 0)
+        return 0.0, 0.0
+    score = float(getattr(answer, "score", 0) or 0)
     confidence = float(getattr(answer, "confidence", 0.0) or 0.0)
     return score, confidence
 
@@ -311,7 +311,7 @@ class TypeSafeToolRouter:
                 use_legacy_routing=False,
             )
 
-        if quality_conf >= voice_noul_confidence_min() and quality_score == 0:
+        if quality_conf >= voice_noul_confidence_min() and quality_score < 0.5:
             return VoiceTranscriptDecision(
                 usable=False,
                 path=VOICE_IGNORE,
@@ -391,9 +391,11 @@ class TypeSafeToolRouter:
         if not provider or provider not in available_providers or provider_conf < arg_confidence_min():
             provider = fallback.provider
 
-        duck_level, duck_conf = _score_answer(result, "music_duck")
+        duck_score, duck_conf = _score_answer(result, "music_duck")
         if duck_conf < arg_confidence_min():
             duck_level = fallback.music_duck_level
+        else:
+            duck_level = max(0, min(2, round(duck_score)))
         if not music_playing:
             duck_level = 0
 
