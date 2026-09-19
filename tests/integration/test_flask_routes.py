@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 from io import BytesIO
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -571,6 +572,80 @@ class TestVoicePreviewRoutes:
         files = mock_post.call_args.kwargs['files']
         assert files['file'][0] == 'audio.wav'
         assert files['file'][2] == 'audio/wav'
+
+    def test_stt_transcribe_defaults_whisper_url_when_env_unset(self, build_flask_test_app):
+        app = build_flask_test_app()
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {'text': 'ok'}
+
+        with patch.dict('os.environ'):
+            os.environ.pop('WHISPER_API_URL', None)
+            with patch('flask_routes.requests.post', return_value=mock_response) as mock_post:
+                with app.test_client() as client:
+                    response = client.post(
+                        '/stt/transcribe',
+                        data={'file': (BytesIO(b'wav'), 'audio.wav')},
+                        content_type='multipart/form-data',
+                    )
+
+        assert response.status_code == 200
+        mock_post.assert_called_once()
+        assert mock_post.call_args.args[0] == 'http://whisper-asr:5002/transcribe'
+
+    def test_stt_transcribe_whitespace_form_prompt_omits_data(self, build_flask_test_app):
+        app = build_flask_test_app()
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {'text': 'ok'}
+
+        with patch.dict('os.environ', {'WHISPER_INITIAL_PROMPT': 'Tangerina'}):
+            with patch('flask_routes.requests.post', return_value=mock_response) as mock_post:
+                with app.test_client() as client:
+                    response = client.post(
+                        '/stt/transcribe',
+                        data={
+                            'file': (BytesIO(b'wav'), 'audio.wav'),
+                            'prompt': '   ',
+                        },
+                        content_type='multipart/form-data',
+                    )
+
+        assert response.status_code == 200
+        assert mock_post.call_args.kwargs['data'] is None
+
+    def test_stt_transcribe_whitespace_env_prompt_omits_data(self, build_flask_test_app):
+        app = build_flask_test_app()
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {'text': 'ok'}
+
+        with patch.dict('os.environ', {'WHISPER_INITIAL_PROMPT': '   '}):
+            with patch('flask_routes.requests.post', return_value=mock_response) as mock_post:
+                with app.test_client() as client:
+                    response = client.post(
+                        '/stt/transcribe',
+                        data={'file': (BytesIO(b'wav'), 'audio.wav')},
+                        content_type='multipart/form-data',
+                    )
+
+        assert response.status_code == 200
+        assert mock_post.call_args.kwargs['data'] is None
+
+    def test_tts_preview_generate_failure_skips_cleanup(self, build_flask_test_app):
+        mock_piper = MagicMock()
+        mock_piper.generate_speech.side_effect = RuntimeError('piper down')
+        app = build_flask_test_app(tts_providers={'piper': mock_piper})
+
+        with patch('flask_routes.cleanup_tts_file') as mock_cleanup:
+            with app.test_client() as client:
+                response = client.post('/tts/preview', json={'text': 'olá'})
+
+        assert response.status_code == 500
+        mock_cleanup.assert_not_called()
 
     def test_stt_transcribe_empty_form_prompt_uses_env(self, build_flask_test_app):
         app = build_flask_test_app()

@@ -12,7 +12,11 @@ def _run_helpers(body, extra_env=None):
     prelude = SCRIPT.read_text().split('\nstatus=0', 1)[0]
     env = os.environ.copy()
     if extra_env:
-        env.update(extra_env)
+        for key, value in extra_env.items():
+            if value is None:
+                env.pop(key, None)
+            else:
+                env[key] = value
     return subprocess.run(
         ['bash', '-c', prelude + '\n' + body],
         capture_output=True,
@@ -40,6 +44,22 @@ class TestSmokeVoiceRoundtripHelpers:
         assert result.returncode == 0, result.stderr
         payload = json.loads(result.stdout.strip())
         assert payload == {'text': phrase, 'provider': 'piper'}
+
+    def test_json_bot_preview_defaults_provider_to_piper(self):
+        phrase = 'Olá, Tangerina'
+        result = _run_helpers(
+            'json_bot_preview',
+            extra_env={'SMOKE_PHRASE': phrase},
+        )
+        assert result.returncode == 0, result.stderr
+        payload = json.loads(result.stdout.strip())
+        assert payload == {'text': phrase, 'provider': 'piper'}
+
+    def test_json_tts_text_uses_default_phrase_when_unset(self):
+        result = _run_helpers('json_tts_text', extra_env={'SMOKE_PHRASE': None})
+        assert result.returncode == 0, result.stderr
+        payload = json.loads(result.stdout.strip())
+        assert payload == {'text': 'Olá, este é um teste de voz do Tangerina.'}
 
     def test_normalize_text_strips_accents_and_punctuation(self):
         result = _run_helpers(
@@ -89,6 +109,12 @@ class TestSmokeVoiceRoundtripHelpers:
         )
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == ''
+
+    def test_parse_transcript_json_invalid_json_fails(self):
+        result = _run_helpers(
+            "printf %s 'not-json' | parse_transcript_json",
+        )
+        assert result.returncode != 0
 
     def test_fuzzy_match_accepts_reordered_long_tokens(self):
         result = _run_helpers(
