@@ -34,7 +34,7 @@ Environment variables:
 |----------|---------|---------|
 | `BASE_URL` | `http://127.0.0.1` | Host prefix; sidecars use `:5001`, `:5002`, `:5003`, bot `:5000` |
 | `PIPER_URL` / `WHISPER_URL` / `OMNIVOICE_URL` / `BOT_URL` | derived from `BASE_URL` | Override individual services |
-| `SMOKE_PHRASE` | PT-BR test sentence | Expected transcript (accent/case normalized) |
+| `SMOKE_PHRASE` | `Olá, este é um teste de voz do Tangerina.` | Expected transcript (accent/case normalized); passed to TTS JSON as `{"text":...}` |
 | `RUN_OMNIVOICE` | `0` | Set to `1` to run OmniVoice TTS roundtrip |
 | `USE_BOT` | `0` | Set to `1` to hit `/tts/preview` and `/stt/transcribe` on the bot |
 
