@@ -951,6 +951,10 @@ Os serviços incluem health checks automáticos:
 - Piper TTS: `http://localhost:5001/health`
 - OmniVoice TTS: `http://localhost:5003/health`
 
+### Voice smoke (sem Discord)
+
+Para validar TTS + STT (Piper/Whisper e rotas Flask `/tts/preview`, `/stt/transcribe`) sem entrar em canal de voz, veja [docs/voice-smoke.md](docs/voice-smoke.md) e execute `scripts/smoke_voice_roundtrip.sh` contra o host Aspire ou local.
+
 ### Variáveis de Ambiente no Docker
 
 Todas as variáveis de ambiente definidas no arquivo `.env` na raiz do projeto são automaticamente carregadas pelo Docker Compose. Certifique-se de configurar:

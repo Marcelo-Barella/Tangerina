@@ -190,7 +190,13 @@ async def speak_tts(guild_id: int, channel_id: int, text: str, provider: Optiona
 music_bot.speak_tts_func = speak_tts
 
 flask_app, set_bot_loop = create_flask_app(
-    bot, music_bot, music_service, chatbot, speak_tts, 'omnivoice' in tts_providers
+    bot,
+    music_bot,
+    music_service,
+    chatbot,
+    speak_tts,
+    'omnivoice' in tts_providers,
+    tts_providers=tts_providers,
 )
 
 @bot.event
