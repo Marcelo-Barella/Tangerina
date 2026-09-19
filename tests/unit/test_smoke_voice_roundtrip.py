@@ -8,8 +8,7 @@ import pytest
 SCRIPT = Path(__file__).resolve().parents[2] / 'scripts' / 'smoke_voice_roundtrip.sh'
 
 
-def _run_helpers(body, extra_env=None):
-    prelude = SCRIPT.read_text().split('\nstatus=0', 1)[0]
+def _bash_env(extra_env=None):
     env = os.environ.copy()
     if extra_env:
         for key, value in extra_env.items():
@@ -17,11 +16,27 @@ def _run_helpers(body, extra_env=None):
                 env.pop(key, None)
             else:
                 env[key] = value
+    return env
+
+
+def _run_helpers(body, extra_env=None):
+    prelude = SCRIPT.read_text().split('\nstatus=0', 1)[0]
     return subprocess.run(
         ['bash', '-c', prelude + '\n' + body],
         capture_output=True,
         text=True,
-        env=env,
+        env=_bash_env(extra_env),
+        check=False,
+    )
+
+
+def _run_driver(stubs, extra_env=None):
+    prelude, rest = SCRIPT.read_text().split('\nstatus=0', 1)
+    return subprocess.run(
+        ['bash', '-c', prelude + '\n' + stubs + '\nstatus=0' + rest],
+        capture_output=True,
+        text=True,
+        env=_bash_env(extra_env),
         check=False,
     )
 
@@ -243,3 +258,156 @@ run_sidecar_roundtrip piper http://piper.test
         )
         assert result.returncode == 1
         assert 'did not match expected phrase' in result.stderr
+
+    def test_sidecar_roundtrip_fails_when_tts_curl_fails(self):
+        result = _run_helpers(
+            '''
+curl() { return 1; }
+run_sidecar_roundtrip piper http://piper.test
+''',
+        )
+        assert result.returncode == 1
+        assert 'TTS request failed' in result.stderr
+
+    def test_bot_roundtrip_rejects_empty_wav(self):
+        result = _run_helpers(
+            '''
+curl() {
+  local out=""
+  while [[ $# -gt 0 ]]; do
+    if [[ "$1" == "-o" ]]; then
+      out="$2"
+      shift 2
+      continue
+    fi
+    shift
+  done
+  if [[ -n "$out" ]]; then
+    : > "$out"
+  fi
+}
+run_bot_roundtrip
+''',
+        )
+        assert result.returncode == 1
+        assert 'empty WAV from /tts/preview' in result.stderr
+
+    def test_bot_roundtrip_passes_when_transcript_matches(self):
+        result = _run_helpers(
+            '''
+curl() {
+  local out=""
+  local url=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -o) out="$2"; shift 2 ;;
+      http*) url="$1"; shift ;;
+      *) shift ;;
+    esac
+  done
+  if [[ -n "$out" ]]; then
+    [[ "$url" == *"/tts/preview" ]] || { echo "unexpected tts url $url" >&2; return 1; }
+    printf 'RIFF' > "$out"
+    return 0
+  fi
+  [[ "$url" == *"/stt/transcribe" ]] || { echo "unexpected stt url $url" >&2; return 1; }
+  printf '%s' '{"text":"Olá, este é um teste de voz do Tangerina."}'
+}
+run_bot_roundtrip
+''',
+        )
+        assert result.returncode == 0, result.stderr
+        assert 'PASS: [bot] Flask preview TTS+STT roundtrip' in result.stdout
+
+    def test_bot_roundtrip_fails_when_transcript_mismatches(self):
+        result = _run_helpers(
+            '''
+curl() {
+  local out=""
+  local url=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -o) out="$2"; shift 2 ;;
+      http*) url="$1"; shift ;;
+      *) shift ;;
+    esac
+  done
+  if [[ -n "$out" ]]; then
+    printf 'RIFF' > "$out"
+    return 0
+  fi
+  printf '%s' '{"text":"algo completamente diferente"}'
+}
+run_bot_roundtrip
+''',
+        )
+        assert result.returncode == 1
+        assert 'did not match expected phrase' in result.stderr
+
+    def test_driver_runs_only_piper_sidecar_by_default(self):
+        result = _run_driver(
+            '''
+run_sidecar_roundtrip() { echo "sidecar:$1:$2"; return 0; }
+run_bot_roundtrip() { echo bot; return 0; }
+''',
+            extra_env={
+                'BASE_URL': None,
+                'PIPER_URL': None,
+                'WHISPER_URL': None,
+                'OMNIVOICE_URL': None,
+                'BOT_URL': None,
+                'RUN_OMNIVOICE': None,
+                'USE_BOT': None,
+            },
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.splitlines() == [
+            'sidecar:piper:http://127.0.0.1:5001',
+            'Voice smoke: PASS',
+        ]
+
+    def test_driver_runs_omnivoice_and_bot_when_flags_set(self):
+        result = _run_driver(
+            '''
+run_sidecar_roundtrip() { echo "sidecar:$1:$2"; return 0; }
+run_bot_roundtrip() { echo bot; return 0; }
+''',
+            extra_env={
+                'BASE_URL': None,
+                'PIPER_URL': None,
+                'WHISPER_URL': None,
+                'OMNIVOICE_URL': None,
+                'BOT_URL': None,
+                'RUN_OMNIVOICE': '1',
+                'USE_BOT': '1',
+            },
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.splitlines() == [
+            'sidecar:piper:http://127.0.0.1:5001',
+            'sidecar:omnivoice:http://127.0.0.1:5003',
+            'bot',
+            'Voice smoke: PASS',
+        ]
+
+    def test_driver_continues_optional_roundtrips_after_piper_failure(self):
+        result = _run_driver(
+            '''
+run_sidecar_roundtrip() { echo "sidecar:$1"; return 1; }
+run_bot_roundtrip() { echo bot; return 0; }
+''',
+            extra_env={
+                'BASE_URL': None,
+                'PIPER_URL': None,
+                'WHISPER_URL': None,
+                'OMNIVOICE_URL': None,
+                'BOT_URL': None,
+                'RUN_OMNIVOICE': '1',
+                'USE_BOT': '1',
+            },
+        )
+        assert result.returncode == 1
+        assert 'sidecar:piper' in result.stdout
+        assert 'sidecar:omnivoice' in result.stdout
+        assert 'bot' in result.stdout
+        assert 'Voice smoke: FAIL' in result.stderr
