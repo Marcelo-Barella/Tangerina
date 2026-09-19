@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
 
 from chatbot.tool_response import derive_action_reply, resolve_tool_response
+from chatbot.typesafe_router import TypeSafeToolRouter
 from chatbot.voice_join import is_join_voice_request, text_claims_voice_join
 
 logger = logging.getLogger(__name__)
@@ -358,6 +359,7 @@ class BaseChatbot(ABC):
         self.web_search_service = web_search_service
         self._tools_schema = build_tools_schema()
         self._tool_mapping = build_tool_mapping(self._tools_schema)
+        self.typesafe_router = TypeSafeToolRouter()
 
     @abstractmethod
     def _initialize_client(self, api_key: str):
@@ -732,6 +734,19 @@ class BaseChatbot(ABC):
                                           retrieved_memories: Optional[List[Dict]] = None) -> Tuple[str, List[Dict[str, Any]]]:
         if not isinstance(message, str) or not message.strip():
             return "Manda a pergunta de novo pra mim, por favor.", []
+
+        router = getattr(self, "typesafe_router", None)
+        if router and router.enabled:
+            routed = await router.try_route_user_turn(
+                self,
+                message,
+                guild_id,
+                channel_id,
+                user_id,
+                app_functions,
+            )
+            if routed is not None:
+                return routed
 
         messages = self._build_messages(message, context, guild_id, channel_id, user_id, retrieved_memories)
         tool_calls_executed = []

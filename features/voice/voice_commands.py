@@ -54,6 +54,7 @@ try:
 except ImportError:
     OpusError = Exception
 
+from chatbot.typesafe_settings import VOICE_CONVERSATION, VOICE_FAST_COMMAND, VOICE_IGNORE
 from features.voice.openai_whisper_api import (
     DEFAULT_WHISPER_LANGUAGE,
     TRANSCRIPTION_TIMEOUT,
@@ -222,8 +223,28 @@ class VoiceCommandSink(BaseSink):
     async def _route_speech(self, member: discord.Member, text: str) -> None:
         text_lower = text.lower().strip()
         is_listening = self.listening_mode.get(member.id, False)
-        
-        if WAKE_WORD in text_lower:
+        wake_present = WAKE_WORD in text_lower
+
+        router = getattr(self.chatbot, "typesafe_router", None) if self.chatbot else None
+        if router and router.enabled:
+            decision = await router.evaluate_voice_transcript(
+                text.strip(),
+                listening_mode=is_listening,
+                wake_word_present=wake_present,
+            )
+            if not decision.usable:
+                return
+            if not decision.use_legacy_routing:
+                if decision.path == VOICE_IGNORE:
+                    return
+                if decision.path == VOICE_FAST_COMMAND:
+                    await self._handle_voice_command(member, text.strip())
+                    return
+                if decision.path == VOICE_CONVERSATION and not is_listening and not decision.wake_for_conversation:
+                    await self._handle_voice_command(member, text.strip())
+                    return
+
+        if wake_present:
             wake_word_index = text_lower.find(WAKE_WORD)
             command_text = text[wake_word_index + len(WAKE_WORD):].strip()
             command_text = re.sub(r'^[,.\s]+', '', command_text)
@@ -560,11 +581,51 @@ class VoiceCommandSink(BaseSink):
         return response
 
     async def _speak_response_if_enabled(self, response: str) -> None:
-        if 'piper' not in self.tts_providers or not self.tts_providers['piper'] or not self.speak_tts_func:
+        if not self.speak_tts_func or not self.tts_providers:
             return
         voice_client = self.music_service.music_bot.voice_clients.get(self.guild_id)
-        if voice_client and voice_client.is_connected():
-            await self.speak_tts_func(self.guild_id, voice_client.channel.id, response, 'piper')
+        if not voice_client or not voice_client.is_connected():
+            return
+
+        available_providers = [
+            name
+            for name in ("piper", "elevenlabs", "omnivoice")
+            if name in self.tts_providers and self.tts_providers[name]
+        ]
+        if not available_providers:
+            return
+
+        default_provider = os.getenv("TTS_PROVIDER", "piper")
+        if default_provider not in available_providers:
+            default_provider = available_providers[0]
+
+        music_playing = bool(
+            voice_client.is_playing()
+            or self.music_service.music_bot.current_songs.get(self.guild_id)
+        )
+
+        provider = default_provider
+        mixed_volume = None
+        router = getattr(self.chatbot, "typesafe_router", None) if self.chatbot else None
+        if router and router.enabled:
+            decision = await router.evaluate_tts_playback(
+                response,
+                available_providers,
+                music_playing=music_playing,
+                default_provider=default_provider,
+            )
+            if not decision.should_speak:
+                return
+            provider = decision.provider
+            mixed_volume = decision.mixed_volume
+
+        await self.speak_tts_func(
+            self.guild_id,
+            voice_client.channel.id,
+            response,
+            provider,
+            mixed_volume,
+        )
 
     def _start_health_monitor(self) -> None:
         if self._health_monitor_started:
