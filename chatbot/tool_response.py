@@ -2,6 +2,7 @@ from typing import Any, Dict, List, Optional
 
 from features.discord.chatbot_reply import _SUPPRESSED_RESPONSES
 
+
 def _result_message(result: Dict[str, Any], default: str) -> str:
     message = (result.get("message") or "").strip()
     return message or default

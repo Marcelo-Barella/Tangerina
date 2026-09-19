@@ -46,6 +46,10 @@ MUSIC_COMMAND_KEYWORDS = (
 )
 
 
+def _float_env(name: str, default: str) -> float:
+    return float(os.getenv(name, default))
+
+
 def typesafe_enabled() -> bool:
     key = os.getenv("TYPESAFE_API_KEY")
     if not key or not key.strip():
@@ -54,23 +58,23 @@ def typesafe_enabled() -> bool:
 
 
 def route_confidence_min() -> float:
-    return float(os.getenv("TYPESAFE_ROUTE_CONFIDENCE", "0.65"))
+    return _float_env("TYPESAFE_ROUTE_CONFIDENCE", "0.65")
 
 
 def arg_confidence_min() -> float:
-    return float(os.getenv("TYPESAFE_ARG_CONFIDENCE", "0.6"))
+    return _float_env("TYPESAFE_ARG_CONFIDENCE", "0.6")
 
 
 def voice_path_confidence_min() -> float:
-    return float(os.getenv("TYPESAFE_VOICE_PATH_CONFIDENCE", "0.6"))
+    return _float_env("TYPESAFE_VOICE_PATH_CONFIDENCE", "0.6")
 
 
 def voice_noul_confidence_min() -> float:
-    return float(os.getenv("TYPESAFE_VOICE_NOUL_CONFIDENCE", "0.55"))
+    return _float_env("TYPESAFE_VOICE_NOUL_CONFIDENCE", "0.55")
 
 
 def tts_speak_confidence_min() -> float:
-    return float(os.getenv("TYPESAFE_TTS_SPEAK_CONFIDENCE", "0.55"))
+    return _float_env("TYPESAFE_TTS_SPEAK_CONFIDENCE", "0.55")
 
 
 def typesafe_model() -> Optional[str]:

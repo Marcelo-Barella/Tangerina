@@ -100,7 +100,7 @@ class TypeSafeToolRouter:
         self,
         message: str,
     ) -> Tuple[Dict[str, Any], Dict[str, str], Dict[str, str], Dict[str, str]]:
-        from typesafe_sdk import Choice, Noul
+        from typesafe_sdk import Choice
 
         route_criteria = {ROUTE_NONE_LABEL: "Conversation or unclear intent; no direct tool action."}
         for tool in sorted(ROUTABLE_TOOLS):
@@ -117,9 +117,6 @@ class TypeSafeToolRouter:
                     "pick the single best tool to run immediately, or none."
                 ),
                 criteria=route_criteria,
-            ),
-            "needs_voice_channel": Noul(
-                instructions="Does the selected action require the user's current voice channel?",
             ),
         }
         if play_criteria:

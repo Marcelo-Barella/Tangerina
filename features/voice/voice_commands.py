@@ -249,9 +249,8 @@ class VoiceCommandSink(BaseSink):
         is_listening = self.listening_mode.get(member.id, False)
         wake_present = WAKE_WORD in text_lower
 
-        router = getattr(self.chatbot, "typesafe_router", None) if self.chatbot else None
-        if router and router.enabled:
-            decision = await router.evaluate_voice_transcript(
+        if self.chatbot and self.chatbot.typesafe_router.enabled:
+            decision = await self.chatbot.typesafe_router.evaluate_voice_transcript(
                 text.strip(),
                 listening_mode=is_listening,
                 wake_word_present=wake_present,
@@ -637,9 +636,8 @@ class VoiceCommandSink(BaseSink):
 
         provider = default_provider
         mixed_volume = None
-        router = getattr(self.chatbot, "typesafe_router", None) if self.chatbot else None
-        if router and router.enabled:
-            decision = await router.evaluate_tts_playback(
+        if self.chatbot and self.chatbot.typesafe_router.enabled:
+            decision = await self.chatbot.typesafe_router.evaluate_tts_playback(
                 response,
                 available_providers,
                 music_playing=music_playing,
