@@ -131,3 +131,115 @@ class TestSmokeVoiceRoundtripHelpers:
         )
         assert accepted.returncode == 0, accepted.stderr
         assert rejected.returncode == 1
+
+    def test_service_urls_strip_base_url_slash_and_use_default_ports(self):
+        result = _run_helpers(
+            'printf "%s\\n" "$BASE_URL" "$PIPER_URL" "$WHISPER_URL" "$OMNIVOICE_URL" "$BOT_URL"',
+            extra_env={
+                'BASE_URL': 'http://voice.example/',
+                'PIPER_URL': None,
+                'WHISPER_URL': None,
+                'OMNIVOICE_URL': None,
+                'BOT_URL': None,
+            },
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.splitlines() == [
+            'http://voice.example',
+            'http://voice.example:5001',
+            'http://voice.example:5002',
+            'http://voice.example:5003',
+            'http://voice.example:5000',
+        ]
+
+    def test_explicit_service_urls_override_base_url(self):
+        result = _run_helpers(
+            'printf "%s\\n" "$PIPER_URL" "$WHISPER_URL" "$OMNIVOICE_URL" "$BOT_URL"',
+            extra_env={
+                'BASE_URL': 'http://voice.example',
+                'PIPER_URL': 'http://piper.local:9',
+                'WHISPER_URL': 'http://whisper.local:8',
+                'OMNIVOICE_URL': 'http://omnivoice.local:7',
+                'BOT_URL': 'http://bot.local:6',
+            },
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.splitlines() == [
+            'http://piper.local:9',
+            'http://whisper.local:8',
+            'http://omnivoice.local:7',
+            'http://bot.local:6',
+        ]
+
+    def test_sidecar_roundtrip_rejects_empty_wav(self):
+        result = _run_helpers(
+            '''
+curl() {
+  local out=""
+  while [[ $# -gt 0 ]]; do
+    if [[ "$1" == "-o" ]]; then
+      out="$2"
+      shift 2
+      continue
+    fi
+    shift
+  done
+  if [[ -n "$out" ]]; then
+    : > "$out"
+  fi
+}
+run_sidecar_roundtrip piper http://piper.test
+''',
+        )
+        assert result.returncode == 1
+        assert 'empty WAV' in result.stderr
+
+    def test_sidecar_roundtrip_passes_when_transcript_matches(self):
+        result = _run_helpers(
+            '''
+curl() {
+  local out=""
+  while [[ $# -gt 0 ]]; do
+    if [[ "$1" == "-o" ]]; then
+      out="$2"
+      shift 2
+      continue
+    fi
+    shift
+  done
+  if [[ -n "$out" ]]; then
+    printf 'RIFF' > "$out"
+    return 0
+  fi
+  printf '%s' '{"text":"Olá, este é um teste de voz do Tangerina."}'
+}
+run_sidecar_roundtrip piper http://piper.test
+''',
+        )
+        assert result.returncode == 0, result.stderr
+        assert 'PASS: [piper] sidecar TTS+STT roundtrip' in result.stdout
+
+    def test_sidecar_roundtrip_fails_when_transcript_mismatches(self):
+        result = _run_helpers(
+            '''
+curl() {
+  local out=""
+  while [[ $# -gt 0 ]]; do
+    if [[ "$1" == "-o" ]]; then
+      out="$2"
+      shift 2
+      continue
+    fi
+    shift
+  done
+  if [[ -n "$out" ]]; then
+    printf 'RIFF' > "$out"
+    return 0
+  fi
+  printf '%s' '{"text":"algo completamente diferente"}'
+}
+run_sidecar_roundtrip piper http://piper.test
+''',
+        )
+        assert result.returncode == 1
+        assert 'did not match expected phrase' in result.stderr
