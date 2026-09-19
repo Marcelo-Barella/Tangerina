@@ -288,6 +288,11 @@ class TestVoicePreviewRoutes:
 
         assert response.status_code == 200
         mock_piper.generate_speech.assert_called_once_with('olá')
+        mock_send_file.assert_called_once()
+        assert mock_send_file.call_args.args[0] == '/tmp/fake-preview.wav'
+        assert mock_send_file.call_args.kwargs['mimetype'] == 'audio/wav'
+        assert mock_send_file.call_args.kwargs['download_name'] == 'preview.wav'
+        assert mock_send_file.call_args.kwargs['as_attachment'] is False
 
     def test_stt_transcribe_proxies_whisper(self, mock_bot, mock_music_bot, mock_music_service):
         from flask_routes import create_flask_app
@@ -752,6 +757,143 @@ class TestVoicePreviewRoutes:
         assert response.status_code == 503
         data = json.loads(response.data)
         assert 'requests library is not available' in data['error']
+
+    def test_tts_preview_normalizes_provider_case(
+        self, mock_bot, mock_music_bot, mock_music_service
+    ):
+        from flask_routes import create_flask_app
+
+        mock_piper = MagicMock()
+        mock_piper.generate_speech.return_value = '/tmp/fake-preview.wav'
+        speak_tts = AsyncMock()
+        app, set_loop = create_flask_app(
+            mock_bot,
+            mock_music_bot,
+            mock_music_service,
+            MagicMock(),
+            speak_tts,
+            False,
+            tts_providers={'piper': mock_piper},
+        )
+        set_loop(asyncio.get_event_loop())
+        app.config['TESTING'] = True
+
+        with patch('flask_routes.send_file') as mock_send_file:
+            mock_send_file.return_value = MagicMock(status_code=200)
+            with patch('builtins.open', create=True):
+                with app.test_client() as client:
+                    response = client.post(
+                        '/tts/preview',
+                        json={'text': 'olá', 'provider': 'PIPER'},
+                    )
+
+        assert response.status_code == 200
+        mock_piper.generate_speech.assert_called_once_with('olá')
+
+    def test_tts_preview_uses_omnivoice_provider(
+        self, mock_bot, mock_music_bot, mock_music_service
+    ):
+        from flask_routes import create_flask_app
+
+        mock_omnivoice = MagicMock()
+        mock_omnivoice.generate_speech.return_value = '/tmp/omni-preview.wav'
+        speak_tts = AsyncMock()
+        app, set_loop = create_flask_app(
+            mock_bot,
+            mock_music_bot,
+            mock_music_service,
+            MagicMock(),
+            speak_tts,
+            True,
+            tts_providers={'omnivoice': mock_omnivoice},
+        )
+        set_loop(asyncio.get_event_loop())
+        app.config['TESTING'] = True
+
+        with patch('flask_routes.send_file') as mock_send_file:
+            mock_send_file.return_value = MagicMock(status_code=200)
+            with patch('builtins.open', create=True):
+                with app.test_client() as client:
+                    response = client.post(
+                        '/tts/preview',
+                        json={'text': 'olá', 'provider': 'omnivoice'},
+                    )
+
+        assert response.status_code == 200
+        mock_omnivoice.generate_speech.assert_called_once_with('olá')
+        assert mock_send_file.call_args.args[0] == '/tmp/omni-preview.wav'
+
+    def test_stt_transcribe_defaults_filename_and_mimetype(
+        self, mock_bot, mock_music_bot, mock_music_service
+    ):
+        from flask_routes import create_flask_app
+        from werkzeug.datastructures import FileStorage
+
+        speak_tts = AsyncMock()
+        app, set_loop = create_flask_app(
+            mock_bot,
+            mock_music_bot,
+            mock_music_service,
+            MagicMock(),
+            speak_tts,
+            False,
+        )
+        set_loop(asyncio.get_event_loop())
+        app.config['TESTING'] = True
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {'text': 'ok'}
+        uploaded = FileStorage(stream=BytesIO(b'wav'), filename='', content_type='')
+
+        with patch('flask_routes.requests.post', return_value=mock_response) as mock_post:
+            with app.test_client() as client:
+                response = client.post(
+                    '/stt/transcribe',
+                    data={'file': uploaded},
+                    content_type='multipart/form-data',
+                )
+
+        assert response.status_code == 200
+        files = mock_post.call_args.kwargs['files']
+        assert files['file'][0] == 'audio.wav'
+        assert files['file'][2] == 'audio/wav'
+
+    def test_stt_transcribe_empty_form_prompt_uses_env(
+        self, mock_bot, mock_music_bot, mock_music_service
+    ):
+        from flask_routes import create_flask_app
+
+        speak_tts = AsyncMock()
+        app, set_loop = create_flask_app(
+            mock_bot,
+            mock_music_bot,
+            mock_music_service,
+            MagicMock(),
+            speak_tts,
+            False,
+        )
+        set_loop(asyncio.get_event_loop())
+        app.config['TESTING'] = True
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {'text': 'ok'}
+
+        with patch.dict('os.environ', {'WHISPER_INITIAL_PROMPT': 'Tangerina'}):
+            with patch('flask_routes.requests.post', return_value=mock_response) as mock_post:
+                with app.test_client() as client:
+                    response = client.post(
+                        '/stt/transcribe',
+                        data={
+                            'file': (BytesIO(b'wav'), 'audio.wav'),
+                            'prompt': '',
+                        },
+                        content_type='multipart/form-data',
+                    )
+
+        assert response.status_code == 200
+        assert mock_post.call_args.kwargs['data'] == {'prompt': 'Tangerina'}
 
 
 @pytest.mark.integration

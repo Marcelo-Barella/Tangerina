@@ -186,3 +186,43 @@ class TestAppFlaskTtsProviders:
         kwargs = flask_routes.create_flask_app.call_args.kwargs
         assert kwargs["tts_providers"] is app_module.tts_providers
         assert kwargs["tts_providers"]["omnivoice"] is mock_client
+
+
+@pytest.mark.unit
+class TestAppPiperRegistration:
+    def test_registers_piper_when_provider_is_piper(self):
+        mock_client = MagicMock()
+        env = {
+            "DISCORD_BOT_TOKEN": "test-token",
+            "TTS_PROVIDER": "piper",
+        }
+        with patch("features.tts.piper_tts.PiperTTS", return_value=mock_client) as factory:
+            app_module = _reload_app(env)
+        assert app_module.tts_providers["piper"] is mock_client
+        factory.assert_called_once()
+        flask_routes = sys.modules["flask_routes"]
+        kwargs = flask_routes.create_flask_app.call_args.kwargs
+        assert kwargs["tts_providers"]["piper"] is mock_client
+
+    def test_does_not_register_piper_when_default_is_elevenlabs(self):
+        env = {
+            "DISCORD_BOT_TOKEN": "test-token",
+            "TTS_PROVIDER": "elevenlabs",
+            "ELEVEN_API_KEY": "test-eleven-key",
+        }
+        with patch("features.tts.piper_tts.PiperTTS") as factory:
+            app_module = _reload_app(env)
+        assert "piper" not in app_module.tts_providers
+        factory.assert_not_called()
+
+    def test_piper_init_failure_leaves_provider_unregistered(self):
+        env = {
+            "DISCORD_BOT_TOKEN": "test-token",
+            "TTS_PROVIDER": "piper",
+        }
+        with patch(
+            "features.tts.piper_tts.PiperTTS",
+            side_effect=RuntimeError("piper missing"),
+        ):
+            app_module = _reload_app(env)
+        assert "piper" not in app_module.tts_providers

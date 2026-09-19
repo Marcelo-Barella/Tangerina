@@ -95,3 +95,13 @@ class TestSmokeVoiceRoundtripHelpers:
             'fuzzy_match "teste tangerina voz" "voz extra teste tangerina"',
         )
         assert result.returncode == 0, result.stderr
+
+    def test_fuzzy_match_ignores_short_tokens_but_requires_long_ones(self):
+        accepted = _run_helpers(
+            'fuzzy_match "um teste de voz" "teste voz"',
+        )
+        rejected = _run_helpers(
+            'fuzzy_match "um teste de voz" "algo diferente"',
+        )
+        assert accepted.returncode == 0, accepted.stderr
+        assert rejected.returncode == 1
