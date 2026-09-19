@@ -109,47 +109,63 @@ def mock_music_service_unavailable():
     yield service
     service.reset_mock()
 
-@pytest.fixture
-def flask_client(mock_bot, mock_music_bot, mock_music_service):
+def build_flask_test_app(
+    mock_bot,
+    mock_music_bot,
+    music_service,
+    *,
+    omnivoice_enabled=True,
+    tts_providers=None,
+    speak_tts=None,
+    chatbot=None,
+):
     from flask_routes import create_flask_app
 
-    chatbot = MagicMock()
-    chatbot.generate_response = AsyncMock(return_value="Test response")
-    speak_tts = AsyncMock()
-
-    app, set_loop = create_flask_app(mock_bot, mock_music_bot, mock_music_service, chatbot, speak_tts, True)
+    chatbot = chatbot or MagicMock()
+    if speak_tts is None:
+        speak_tts = AsyncMock()
+    app, set_loop = create_flask_app(
+        mock_bot,
+        mock_music_bot,
+        music_service,
+        chatbot,
+        speak_tts,
+        omnivoice_enabled,
+        tts_providers=tts_providers if tts_providers is not None else {},
+    )
     set_loop(asyncio.get_event_loop())
     app.config['TESTING'] = True
+    return app
 
+
+@pytest.fixture
+def flask_client(mock_bot, mock_music_bot, mock_music_service):
+    app = build_flask_test_app(mock_bot, mock_music_bot, mock_music_service)
     with app.test_client() as client:
         yield client
 
 @pytest.fixture
 def flask_client_mocked_music(mock_bot, mock_music_bot, mock_music_service_success):
-    from flask_routes import create_flask_app
-
-    chatbot = MagicMock()
-    chatbot.generate_response = AsyncMock(return_value="Test response")
     speak_tts = AsyncMock(return_value={'success': True})
-
-    app, set_loop = create_flask_app(mock_bot, mock_music_bot, mock_music_service_success, chatbot, speak_tts, True)
-    set_loop(asyncio.get_event_loop())
-    app.config['TESTING'] = True
+    app = build_flask_test_app(
+        mock_bot,
+        mock_music_bot,
+        mock_music_service_success,
+        speak_tts=speak_tts,
+    )
 
     with app.test_client() as client:
         yield client
 
 @pytest.fixture
 def flask_client_integration_music(mock_bot, mock_music_bot, mock_music_service_unavailable):
-    from flask_routes import create_flask_app
-
-    chatbot = MagicMock()
-    chatbot.generate_response = AsyncMock(return_value="Test response")
     speak_tts = AsyncMock(return_value={'success': False, 'error': 'Service unavailable'})
-
-    app, set_loop = create_flask_app(mock_bot, mock_music_bot, mock_music_service_unavailable, chatbot, speak_tts, True)
-    set_loop(asyncio.get_event_loop())
-    app.config['TESTING'] = True
+    app = build_flask_test_app(
+        mock_bot,
+        mock_music_bot,
+        mock_music_service_unavailable,
+        speak_tts=speak_tts,
+    )
 
     with app.test_client() as client:
         yield client
