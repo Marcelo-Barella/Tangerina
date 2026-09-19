@@ -1,15 +1,13 @@
 import asyncio
 import logging
 import os
-from flask import Flask, after_this_request, jsonify, request, send_file
-from features.music.music_service import MusicService
-from features.music.music_bot import MusicBot
-from features.tts.http_tts import cleanup_tts_file
 
-try:
-    import requests
-except ImportError:
-    requests = None
+import requests
+from flask import Flask, after_this_request, jsonify, request, send_file
+from features.music.music_bot import MusicBot
+from features.music.music_service import MusicService
+from features.tts.http_tts import cleanup_tts_file
+from features.voice.openai_whisper_api import TRANSCRIPTION_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
@@ -305,15 +303,11 @@ def create_flask_app(
 
     @flask_app.route('/stt/transcribe', methods=['POST'])
     def stt_transcribe():
-        if requests is None:
-            return jsonify({'error': 'requests library is not available'}), 503
-
         uploaded = request.files.get('file')
         if uploaded is None:
             return jsonify({'error': 'file is required'}), 400
 
         whisper_api_url = os.getenv('WHISPER_API_URL', 'http://whisper-asr:5002').rstrip('/')
-        transcribe_timeout = float(os.getenv('WHISPER_TRANSCRIPTION_TIMEOUT', '30'))
         prompt = (request.form.get('prompt') or os.getenv('WHISPER_INITIAL_PROMPT') or '').strip()
 
         try:
@@ -323,7 +317,7 @@ def create_flask_app(
                 f'{whisper_api_url}/transcribe',
                 files=files,
                 data=data,
-                timeout=transcribe_timeout,
+                timeout=TRANSCRIPTION_TIMEOUT,
             )
         except requests.exceptions.Timeout:
             return jsonify({'error': 'Whisper transcription timed out'}), 504

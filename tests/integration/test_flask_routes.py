@@ -261,49 +261,22 @@ class TestVoicePreviewRoutes:
         data = json.loads(response.data)
         assert 'file is required' in data['error']
 
-    def test_tts_preview_returns_wav(self, mock_bot, mock_music_bot, mock_music_service):
-        from flask_routes import create_flask_app
-
+    def test_tts_preview_returns_wav(self, voice_route_app):
         mock_piper = MagicMock()
         mock_piper.generate_speech.return_value = '/tmp/fake-preview.wav'
 
-        speak_tts = AsyncMock()
-        app, set_loop = create_flask_app(
-            mock_bot,
-            mock_music_bot,
-            mock_music_service,
-            MagicMock(),
-            speak_tts,
-            False,
-            tts_providers={'piper': mock_piper},
-        )
-        set_loop(asyncio.get_event_loop())
-        app.config['TESTING'] = True
+        app = voice_route_app(tts_providers={'piper': mock_piper})
 
         with patch('flask_routes.send_file') as mock_send_file:
             mock_send_file.return_value = MagicMock(status_code=200)
-            with patch('builtins.open', create=True):
-                with app.test_client() as client:
-                    response = client.post('/tts/preview', json={'text': 'olá'})
+            with app.test_client() as client:
+                response = client.post('/tts/preview', json={'text': 'olá'})
 
         assert response.status_code == 200
         mock_piper.generate_speech.assert_called_once_with('olá')
 
-    def test_stt_transcribe_proxies_whisper(self, mock_bot, mock_music_bot, mock_music_service):
-        from flask_routes import create_flask_app
-
-        speak_tts = AsyncMock()
-        app, set_loop = create_flask_app(
-            mock_bot,
-            mock_music_bot,
-            mock_music_service,
-            MagicMock(),
-            speak_tts,
-            False,
-            tts_providers={},
-        )
-        set_loop(asyncio.get_event_loop())
-        app.config['TESTING'] = True
+    def test_stt_transcribe_proxies_whisper(self, voice_route_app):
+        app = voice_route_app()
 
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -331,26 +304,11 @@ class TestVoicePreviewRoutes:
         data = json.loads(response.data)
         assert 'elevenlabs preview is not supported' in data['error']
 
-    def test_tts_preview_generate_failure_returns_500(
-        self, mock_bot, mock_music_bot, mock_music_service
-    ):
-        from flask_routes import create_flask_app
-
+    def test_tts_preview_generate_failure_returns_500(self, voice_route_app):
         mock_piper = MagicMock()
         mock_piper.generate_speech.side_effect = RuntimeError('piper down')
 
-        speak_tts = AsyncMock()
-        app, set_loop = create_flask_app(
-            mock_bot,
-            mock_music_bot,
-            mock_music_service,
-            MagicMock(),
-            speak_tts,
-            False,
-            tts_providers={'piper': mock_piper},
-        )
-        set_loop(asyncio.get_event_loop())
-        app.config['TESTING'] = True
+        app = voice_route_app(tts_providers={'piper': mock_piper})
 
         with app.test_client() as client:
             response = client.post('/tts/preview', json={'text': 'olá'})
@@ -359,23 +317,10 @@ class TestVoicePreviewRoutes:
         data = json.loads(response.data)
         assert data['error'] == 'piper down'
 
-    def test_stt_transcribe_timeout_returns_504(
-        self, mock_bot, mock_music_bot, mock_music_service
-    ):
+    def test_stt_transcribe_timeout_returns_504(self, voice_route_app):
         import requests
-        from flask_routes import create_flask_app
 
-        speak_tts = AsyncMock()
-        app, set_loop = create_flask_app(
-            mock_bot,
-            mock_music_bot,
-            mock_music_service,
-            MagicMock(),
-            speak_tts,
-            False,
-        )
-        set_loop(asyncio.get_event_loop())
-        app.config['TESTING'] = True
+        app = voice_route_app()
 
         with patch('flask_routes.requests.post', side_effect=requests.exceptions.Timeout()):
             with app.test_client() as client:
@@ -389,23 +334,10 @@ class TestVoicePreviewRoutes:
         data = json.loads(response.data)
         assert 'timed out' in data['error'].lower()
 
-    def test_stt_transcribe_sidecar_error_returns_502(
-        self, mock_bot, mock_music_bot, mock_music_service
-    ):
+    def test_stt_transcribe_sidecar_error_returns_502(self, voice_route_app):
         import requests
-        from flask_routes import create_flask_app
 
-        speak_tts = AsyncMock()
-        app, set_loop = create_flask_app(
-            mock_bot,
-            mock_music_bot,
-            mock_music_service,
-            MagicMock(),
-            speak_tts,
-            False,
-        )
-        set_loop(asyncio.get_event_loop())
-        app.config['TESTING'] = True
+        app = voice_route_app()
 
         with patch(
             'flask_routes.requests.post',
@@ -422,22 +354,8 @@ class TestVoicePreviewRoutes:
         data = json.loads(response.data)
         assert 'whisper down' in data['error']
 
-    def test_stt_transcribe_non_json_sidecar_body_returns_502(
-        self, mock_bot, mock_music_bot, mock_music_service
-    ):
-        from flask_routes import create_flask_app
-
-        speak_tts = AsyncMock()
-        app, set_loop = create_flask_app(
-            mock_bot,
-            mock_music_bot,
-            mock_music_service,
-            MagicMock(),
-            speak_tts,
-            False,
-        )
-        set_loop(asyncio.get_event_loop())
-        app.config['TESTING'] = True
+    def test_stt_transcribe_non_json_sidecar_body_returns_502(self, voice_route_app):
+        app = voice_route_app()
 
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -455,22 +373,8 @@ class TestVoicePreviewRoutes:
         data = json.loads(response.data)
         assert 'Invalid JSON from Whisper sidecar' in data['error']
 
-    def test_stt_transcribe_forwards_prompt_and_strips_text(
-        self, mock_bot, mock_music_bot, mock_music_service
-    ):
-        from flask_routes import create_flask_app
-
-        speak_tts = AsyncMock()
-        app, set_loop = create_flask_app(
-            mock_bot,
-            mock_music_bot,
-            mock_music_service,
-            MagicMock(),
-            speak_tts,
-            False,
-        )
-        set_loop(asyncio.get_event_loop())
-        app.config['TESTING'] = True
+    def test_stt_transcribe_forwards_prompt_and_strips_text(self, voice_route_app):
+        app = voice_route_app()
 
         mock_response = MagicMock()
         mock_response.status_code = 200

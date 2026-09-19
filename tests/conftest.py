@@ -155,6 +155,27 @@ def flask_client_integration_music(mock_bot, mock_music_bot, mock_music_service_
         yield client
 
 @pytest.fixture
+def voice_route_app(mock_bot, mock_music_bot, mock_music_service):
+    from flask_routes import create_flask_app
+
+    def build(*, tts_providers=None, omnivoice_enabled=False):
+        speak_tts = AsyncMock()
+        app, set_loop = create_flask_app(
+            mock_bot,
+            mock_music_bot,
+            mock_music_service,
+            MagicMock(),
+            speak_tts,
+            omnivoice_enabled,
+            tts_providers=tts_providers or {},
+        )
+        set_loop(asyncio.get_event_loop())
+        app.config['TESTING'] = True
+        return app
+
+    return build
+
+@pytest.fixture
 def ephemeral_chromadb():
     try:
         import chromadb
