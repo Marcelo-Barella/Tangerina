@@ -575,6 +575,69 @@ class TestDeriveActionReply:
         ]
         assert resolve_tool_response(tool_calls, content="Ainda estou no canal.") == "Saí do canal de voz."
 
+    def test_music_stop_replaces_suppressed_success_text(self, test_chatbot):
+        tool_calls = [
+            {
+                "tool": "MusicStop",
+                "result": {"success": True, "message": "Música parada"},
+            }
+        ]
+        assert resolve_tool_response(tool_calls, content="Ação executada.") == "Música parada"
+
+    def test_music_volume_uses_default_when_message_missing(self, test_chatbot):
+        tool_calls = [
+            {
+                "tool": "MusicVolume",
+                "result": {"success": True},
+            }
+        ]
+        assert resolve_tool_response(tool_calls) == "Volume ajustado."
+
+    def test_music_play_only_fallback_uses_result_message(self, test_chatbot):
+        tool_calls = [
+            {
+                "tool": "MusicPlay",
+                "result": {"success": True, "message": "Now playing: song"},
+            }
+        ]
+        assert resolve_tool_response(tool_calls) == "Now playing: song"
+
+    def test_music_queue_formatter_only_on_fallback(self, test_chatbot):
+        tool_calls = [
+            {
+                "tool": "GET_MusicQueue",
+                "result": {
+                    "success": True,
+                    "current": {"title": "Song A"},
+                    "queue": [{"title": "Song B"}],
+                },
+            }
+        ]
+        llm_text = "Na fila tem Song A e Song B."
+        assert resolve_tool_response(tool_calls, content=llm_text) == llm_text
+        fallback = resolve_tool_response(tool_calls)
+        assert "Tocando agora: Song A" in fallback
+        assert "1. Song B" in fallback
+
+    def test_web_search_formatter_only_on_fallback(self, test_chatbot):
+        tool_calls = [
+            {
+                "tool": "WebSearch",
+                "result": {
+                    "success": True,
+                    "results": [
+                        {"title": "Clima", "url": "https://example.com", "content": "26C"}
+                    ],
+                },
+            }
+        ]
+        llm_text = "Hoje está 26 graus."
+        assert resolve_tool_response(tool_calls, content=llm_text) == llm_text
+        fallback = resolve_tool_response(tool_calls)
+        assert "Clima" in fallback
+        assert "https://example.com" in fallback
+        assert "26C" in fallback
+
 
 @pytest.mark.unit
 class TestJoinVoiceHelpers:
