@@ -705,6 +705,25 @@ class TestVoicePreviewRoutes:
         assert response.status_code == 200
         assert mock_post.call_args.kwargs['timeout'] == 30.0
 
+    def test_stt_transcribe_uses_env_timeout_at_request_time(self, build_flask_test_app):
+        app = build_flask_test_app()
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {'text': 'ok'}
+
+        with patch.dict('os.environ', {'WHISPER_TRANSCRIPTION_TIMEOUT': '12.5'}):
+            with patch('flask_routes.requests.post', return_value=mock_response) as mock_post:
+                with app.test_client() as client:
+                    response = client.post(
+                        '/stt/transcribe',
+                        data={'file': (BytesIO(b'wav'), 'audio.wav')},
+                        content_type='multipart/form-data',
+                    )
+
+        assert response.status_code == 200
+        assert mock_post.call_args.kwargs['timeout'] == 12.5
+
 
 @pytest.mark.integration
 class TestErrorHandling:

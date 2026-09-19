@@ -378,6 +378,30 @@ run_bot_roundtrip
         assert result.returncode == 1
         assert 'did not match expected phrase' in result.stderr
 
+    def test_bot_roundtrip_fails_when_stt_curl_fails(self):
+        result = _run_helpers(
+            '''
+curl() {
+  local out=""
+  local url=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -o) out="$2"; shift 2 ;;
+      http*) url="$1"; shift ;;
+      *) shift ;;
+    esac
+  done
+  if [[ -n "$out" ]]; then
+    printf 'RIFF' > "$out"
+    return 0
+  fi
+  return 1
+}
+run_bot_roundtrip
+''',
+        )
+        assert result.returncode == 1
+
     def test_driver_runs_only_piper_sidecar_by_default(self):
         result = _run_driver(
             '''

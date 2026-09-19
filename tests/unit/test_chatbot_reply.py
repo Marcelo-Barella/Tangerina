@@ -76,6 +76,21 @@ class TestShouldRespondWithChatbot:
         bot_user.mentioned_in = MagicMock(return_value=False)
         assert should_respond_with_chatbot(message, bot_user) is True
 
+    def test_default_role_mention_returns_false(self):
+        message = MagicMock()
+        message.content = "@everyone hello"
+        message.author.bot = False
+        message.guild = MagicMock()
+        default_role = MagicMock()
+        default_role.id = 1
+        message.guild.default_role = default_role
+        message.guild.me = MagicMock()
+        message.guild.me.roles = [default_role]
+        message.role_mentions = [default_role]
+        bot_user = MagicMock()
+        bot_user.mentioned_in = MagicMock(return_value=False)
+        assert should_respond_with_chatbot(message, bot_user) is False
+
     def test_unrelated_role_mention_returns_false(self):
         message = MagicMock()
         message.content = "<@&999> hello"
