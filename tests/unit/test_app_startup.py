@@ -165,3 +165,24 @@ class TestAppWhisperProvider:
             }
         )
         assert app_module.music_bot.whisper_provider == "zhipu"
+
+
+@pytest.mark.unit
+class TestAppFlaskTtsProviders:
+    def test_passes_tts_providers_into_flask_app(self):
+        env = {
+            "DISCORD_BOT_TOKEN": "test-token",
+            "TTS_PROVIDER": "elevenlabs",
+            "ELEVEN_API_KEY": "test-eleven-key",
+            "OMNIVOICE_API_URL": "http://localhost:5003",
+        }
+        mock_client = MagicMock()
+        with patch(
+            "features.tts.http_tts.create_omnivoice_client", return_value=mock_client
+        ):
+            app_module = _reload_app(env)
+        flask_routes = sys.modules["flask_routes"]
+        flask_routes.create_flask_app.assert_called_once()
+        kwargs = flask_routes.create_flask_app.call_args.kwargs
+        assert kwargs["tts_providers"] is app_module.tts_providers
+        assert kwargs["tts_providers"]["omnivoice"] is mock_client

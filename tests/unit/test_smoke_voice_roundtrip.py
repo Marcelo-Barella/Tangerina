@@ -82,3 +82,16 @@ class TestSmokeVoiceRoundtripHelpers:
         )
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == 'transcrito'
+
+    def test_parse_transcript_json_missing_text_is_empty(self):
+        result = _run_helpers(
+            'printf %s \'{}\' | parse_transcript_json',
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == ''
+
+    def test_fuzzy_match_accepts_reordered_long_tokens(self):
+        result = _run_helpers(
+            'fuzzy_match "teste tangerina voz" "voz extra teste tangerina"',
+        )
+        assert result.returncode == 0, result.stderr
