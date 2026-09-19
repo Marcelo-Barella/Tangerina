@@ -166,6 +166,16 @@ class TestAppWhisperProvider:
         )
         assert app_module.music_bot.whisper_provider == "zhipu"
 
+    def test_blank_whisper_provider_auto_selects_openai_api(self):
+        app_module = _reload_app(
+            {
+                "DISCORD_BOT_TOKEN": "test-token",
+                "WHISPER_PROVIDER": "   ",
+                "OPENAI_API_KEY": "sk-test",
+            }
+        )
+        assert app_module.music_bot.whisper_provider == "openai-api"
+
 
 @pytest.mark.unit
 class TestAppFlaskTtsProviders:

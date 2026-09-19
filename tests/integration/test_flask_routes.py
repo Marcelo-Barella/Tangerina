@@ -514,6 +514,22 @@ class TestVoicePreviewRoutes:
         data = json.loads(response.data)
         assert data['text'] == ''
 
+    def test_tts_preview_empty_provider_defaults_to_piper(self, build_flask_test_app):
+        mock_piper = MagicMock()
+        mock_piper.generate_speech.return_value = '/tmp/fake-preview.wav'
+        app = build_flask_test_app(tts_providers={'piper': mock_piper})
+
+        with patch('flask_routes.send_file') as mock_send_file:
+            mock_send_file.return_value = MagicMock(status_code=200)
+            with app.test_client() as client:
+                response = client.post(
+                    '/tts/preview',
+                    json={'text': 'olá', 'provider': ''},
+                )
+
+        assert response.status_code == 200
+        mock_piper.generate_speech.assert_called_once_with('olá')
+
     def test_tts_preview_normalizes_provider_case(self, build_flask_test_app):
         mock_piper = MagicMock()
         mock_piper.generate_speech.return_value = '/tmp/fake-preview.wav'

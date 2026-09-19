@@ -269,6 +269,30 @@ run_sidecar_roundtrip piper http://piper.test
         assert result.returncode == 1
         assert 'TTS request failed' in result.stderr
 
+    def test_sidecar_roundtrip_fails_when_stt_curl_fails(self):
+        result = _run_helpers(
+            '''
+curl() {
+  local out=""
+  while [[ $# -gt 0 ]]; do
+    if [[ "$1" == "-o" ]]; then
+      out="$2"
+      shift 2
+      continue
+    fi
+    shift
+  done
+  if [[ -n "$out" ]]; then
+    printf 'RIFF' > "$out"
+    return 0
+  fi
+  return 1
+}
+run_sidecar_roundtrip piper http://piper.test
+''',
+        )
+        assert result.returncode == 1
+
     def test_bot_roundtrip_rejects_empty_wav(self):
         result = _run_helpers(
             '''
@@ -318,6 +342,16 @@ run_bot_roundtrip
         )
         assert result.returncode == 0, result.stderr
         assert 'PASS: [bot] Flask preview TTS+STT roundtrip' in result.stdout
+
+    def test_bot_roundtrip_fails_when_preview_curl_fails(self):
+        result = _run_helpers(
+            '''
+curl() { return 1; }
+run_bot_roundtrip
+''',
+        )
+        assert result.returncode == 1
+        assert '/tts/preview request failed' in result.stderr
 
     def test_bot_roundtrip_fails_when_transcript_mismatches(self):
         result = _run_helpers(
@@ -387,6 +421,28 @@ run_bot_roundtrip() { echo bot; return 0; }
             'sidecar:piper:http://127.0.0.1:5001',
             'sidecar:omnivoice:http://127.0.0.1:5003',
             'bot',
+            'Voice smoke: PASS',
+        ]
+
+    def test_driver_ignores_optional_flags_unless_exactly_one(self):
+        result = _run_driver(
+            '''
+run_sidecar_roundtrip() { echo "sidecar:$1:$2"; return 0; }
+run_bot_roundtrip() { echo bot; return 0; }
+''',
+            extra_env={
+                'BASE_URL': None,
+                'PIPER_URL': None,
+                'WHISPER_URL': None,
+                'OMNIVOICE_URL': None,
+                'BOT_URL': None,
+                'RUN_OMNIVOICE': 'true',
+                'USE_BOT': 'yes',
+            },
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.splitlines() == [
+            'sidecar:piper:http://127.0.0.1:5001',
             'Voice smoke: PASS',
         ]
 
