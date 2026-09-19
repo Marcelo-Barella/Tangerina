@@ -75,10 +75,10 @@ def _score_answer(result: Any, key: str) -> Tuple[int, float]:
 
 def _duck_volume_for_level(level: int) -> float:
     if level >= 2:
-        return 0.35
+        return 0.05
     if level == 1:
         return 0.2
-    return 0.05
+    return 0.35
 
 
 class TypeSafeToolRouter:
@@ -210,7 +210,7 @@ class TypeSafeToolRouter:
             user_id,
         )
         tool_calls_executed = [{"tool": tool_name, "parameters": params, "result": tool_result}]
-        if not tool_result.get("success"):
+        if tool_result.get("success") is False:
             err = tool_result.get("error", "Erro desconhecido")
             return f"Erro ao executar ação: {err}", tool_calls_executed
 

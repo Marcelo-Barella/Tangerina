@@ -12,6 +12,45 @@ _SKIP_OVERRIDE_TOOLS = frozenset({
 })
 
 
+def _tool_failed(result: Dict[str, Any]) -> bool:
+    if result.get("success") is False:
+        return True
+    if result.get("error") and result.get("success") is not True:
+        return True
+    return False
+
+
+def _format_music_queue_reply(result: Dict[str, Any]) -> str:
+    queue = result.get("queue") or []
+    current = result.get("current")
+    if not queue and not current:
+        return "Fila vazia"
+    lines: List[str] = []
+    if current:
+        lines.append(f"Tocando agora: {current.get('title', 'Unknown')}")
+    for index, song in enumerate(queue[:5]):
+        lines.append(f"{index + 1}. {song.get('title', 'Unknown')}")
+    return f"Fila:\n```{chr(10).join(lines)}```"
+
+
+def _format_web_search_reply(result: Dict[str, Any]) -> str:
+    results = result.get("results") or []
+    if not results:
+        return "Nenhum resultado encontrado."
+    lines: List[str] = []
+    for item in results[:5]:
+        title = (item.get("title") or "").strip() or "Sem título"
+        url = (item.get("url") or "").strip()
+        content = (item.get("content") or "").strip()
+        block = title
+        if url:
+            block = f"{title}\n{url}"
+        if content:
+            block = f"{block}\n{content}"
+        lines.append(block)
+    return "\n\n".join(lines)
+
+
 def derive_action_reply(
     tool_calls_executed: List[Dict[str, Any]],
     *,
@@ -20,13 +59,17 @@ def derive_action_reply(
     if for_fallback:
         for tc in reversed(tool_calls_executed):
             result = tc.get("result") or {}
-            if not result.get("success"):
+            if _tool_failed(result):
                 return f"Erro ao executar ação: {result.get('error', 'Erro desconhecido')}"
     for tc in reversed(tool_calls_executed):
         tool = tc.get("tool")
         result = tc.get("result") or {}
-        if not result.get("success"):
+        if _tool_failed(result):
             continue
+        if tool == "GET_MusicQueue":
+            return _format_music_queue_reply(result)
+        if tool == "WebSearch":
+            return _format_web_search_reply(result)
         if tool in _SKIP_OVERRIDE_TOOLS:
             if for_fallback:
                 continue

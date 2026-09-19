@@ -220,6 +220,30 @@ class VoiceCommandSink(BaseSink):
         except Exception as e:
             logger.error(f"Error processing speech from {member.display_name}: {e}")
 
+    def _strip_wake_word(self, text: str, text_lower: str, wake_present: bool) -> str:
+        if not wake_present:
+            return text.strip()
+        wake_word_index = text_lower.find(WAKE_WORD)
+        if wake_word_index < 0:
+            return text.strip()
+        command_text = text[wake_word_index + len(WAKE_WORD):].strip()
+        return re.sub(r'^[,.\s]+', '', command_text)
+
+    def _music_app_functions(self) -> Dict[str, Any]:
+        return {
+            "get_user_voice_channel": self.music_service.get_user_voice_channel,
+            "play_music": self.music_service.play_music,
+            "play_spotify_music": self.music_service.play_spotify_music,
+            "stop_music": self.music_service.stop_music,
+            "skip_music": self.music_service.skip_music,
+            "pause_music": self.music_service.pause_music,
+            "resume_music": self.music_service.resume_music,
+            "set_volume": self.music_service.set_volume,
+            "get_queue": self.music_service.get_queue,
+            "leave_music": self.music_service.leave_music,
+            "speak_tts": self.speak_tts_func,
+        }
+
     async def _route_speech(self, member: discord.Member, text: str) -> None:
         text_lower = text.lower().strip()
         is_listening = self.listening_mode.get(member.id, False)
@@ -238,16 +262,25 @@ class VoiceCommandSink(BaseSink):
                 if decision.path == VOICE_IGNORE:
                     return
                 if decision.path == VOICE_FAST_COMMAND:
-                    await self._handle_voice_command(member, text.strip())
+                    command_text = self._strip_wake_word(text, text_lower, wake_present)
+                    await self._handle_voice_command(member, command_text)
                     return
-                if decision.path == VOICE_CONVERSATION and not is_listening and not decision.wake_for_conversation:
+                if decision.path == VOICE_CONVERSATION:
+                    if is_listening:
+                        await self._handle_listening_mode(member, text.strip())
+                        return
+                    if decision.wake_for_conversation:
+                        command_text = self._strip_wake_word(text, text_lower, wake_present)
+                        if command_text:
+                            await self._handle_voice_command(member, command_text)
+                            return
+                        await self._activate_listening_mode(member)
+                        return
                     await self._handle_voice_command(member, text.strip())
                     return
 
         if wake_present:
-            wake_word_index = text_lower.find(WAKE_WORD)
-            command_text = text[wake_word_index + len(WAKE_WORD):].strip()
-            command_text = re.sub(r'^[,.\s]+', '', command_text)
+            command_text = self._strip_wake_word(text, text_lower, wake_present)
             
             if command_text and not is_listening:
                 await self._handle_voice_command(member, command_text)
@@ -569,7 +602,7 @@ class VoiceCommandSink(BaseSink):
         if not isinstance(retrieved_memories, dict):
             retrieved_memories = {"recent": [], "semantic": retrieved_memories if isinstance(retrieved_memories, list) else []}
         response = await self.chatbot.generate_response_with_tools(
-            text, [], self.guild_id, None, member.id, {}, retrieved_memories
+            text, [], self.guild_id, None, member.id, self._music_app_functions(), retrieved_memories
         )
         if isinstance(response, tuple):
             response, tool_calls = response
