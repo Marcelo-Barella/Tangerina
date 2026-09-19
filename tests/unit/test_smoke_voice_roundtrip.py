@@ -54,6 +54,18 @@ class TestSmokeVoiceRoundtripHelpers:
         )
         assert result.returncode == 0, result.stderr
 
+    def test_fuzzy_match_accepts_extra_words_around_expected(self):
+        result = _run_helpers(
+            'fuzzy_match "teste de voz" "prefixo teste de voz sufixo"',
+        )
+        assert result.returncode == 0, result.stderr
+
+    def test_fuzzy_match_accepts_truncated_transcript(self):
+        result = _run_helpers(
+            'fuzzy_match "ola este e um teste de voz do tangerina" "este e um teste de voz"',
+        )
+        assert result.returncode == 0, result.stderr
+
     def test_fuzzy_match_rejects_empty_transcript(self):
         result = _run_helpers('fuzzy_match "Olá Tangerina" ""')
         assert result.returncode == 1

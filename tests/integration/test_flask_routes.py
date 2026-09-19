@@ -492,6 +492,106 @@ class TestVoicePreviewRoutes:
         assert data['text'] == 'Olá mundo'
         assert mock_post.call_args.kwargs['data'] == {'prompt': 'Tangerina'}
 
+    def test_stt_transcribe_forwards_sidecar_http_error_json(
+        self, mock_bot, mock_music_bot, mock_music_service
+    ):
+        from flask_routes import create_flask_app
+
+        speak_tts = AsyncMock()
+        app, set_loop = create_flask_app(
+            mock_bot,
+            mock_music_bot,
+            mock_music_service,
+            MagicMock(),
+            speak_tts,
+            False,
+        )
+        set_loop(asyncio.get_event_loop())
+        app.config['TESTING'] = True
+
+        mock_response = MagicMock()
+        mock_response.status_code = 422
+        mock_response.json.return_value = {'error': 'bad audio'}
+
+        with patch('flask_routes.requests.post', return_value=mock_response):
+            with app.test_client() as client:
+                response = client.post(
+                    '/stt/transcribe',
+                    data={'file': (BytesIO(b'wav'), 'audio.wav')},
+                    content_type='multipart/form-data',
+                )
+
+        assert response.status_code == 422
+        data = json.loads(response.data)
+        assert data['error'] == 'bad audio'
+
+    def test_stt_transcribe_forwards_sidecar_http_error_text(
+        self, mock_bot, mock_music_bot, mock_music_service
+    ):
+        from flask_routes import create_flask_app
+
+        speak_tts = AsyncMock()
+        app, set_loop = create_flask_app(
+            mock_bot,
+            mock_music_bot,
+            mock_music_service,
+            MagicMock(),
+            speak_tts,
+            False,
+        )
+        set_loop(asyncio.get_event_loop())
+        app.config['TESTING'] = True
+
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+        mock_response.json.side_effect = ValueError('not json')
+        mock_response.text = 'x' * 250
+
+        with patch('flask_routes.requests.post', return_value=mock_response):
+            with app.test_client() as client:
+                response = client.post(
+                    '/stt/transcribe',
+                    data={'file': (BytesIO(b'wav'), 'audio.wav')},
+                    content_type='multipart/form-data',
+                )
+
+        assert response.status_code == 500
+        data = json.loads(response.data)
+        assert data['error'] == 'x' * 200
+
+    def test_stt_transcribe_uses_env_prompt_when_form_prompt_missing(
+        self, mock_bot, mock_music_bot, mock_music_service
+    ):
+        from flask_routes import create_flask_app
+
+        speak_tts = AsyncMock()
+        app, set_loop = create_flask_app(
+            mock_bot,
+            mock_music_bot,
+            mock_music_service,
+            MagicMock(),
+            speak_tts,
+            False,
+        )
+        set_loop(asyncio.get_event_loop())
+        app.config['TESTING'] = True
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {'text': 'ok'}
+
+        with patch.dict('os.environ', {'WHISPER_INITIAL_PROMPT': '  Tangerina  '}):
+            with patch('flask_routes.requests.post', return_value=mock_response) as mock_post:
+                with app.test_client() as client:
+                    response = client.post(
+                        '/stt/transcribe',
+                        data={'file': (BytesIO(b'wav'), 'audio.wav')},
+                        content_type='multipart/form-data',
+                    )
+
+        assert response.status_code == 200
+        assert mock_post.call_args.kwargs['data'] == {'prompt': 'Tangerina'}
+
 
 @pytest.mark.integration
 class TestErrorHandling:
