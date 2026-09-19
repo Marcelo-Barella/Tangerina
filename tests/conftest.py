@@ -110,6 +110,28 @@ def mock_music_service_unavailable():
     service.reset_mock()
 
 @pytest.fixture
+def build_flask_test_app(mock_bot, mock_music_bot, mock_music_service):
+    from flask_routes import create_flask_app
+
+    def _build(omnivoice_enabled=False, tts_providers=None, music_service=None):
+        speak_tts = AsyncMock()
+        app, set_loop = create_flask_app(
+            mock_bot,
+            mock_music_bot,
+            music_service if music_service is not None else mock_music_service,
+            MagicMock(),
+            speak_tts,
+            omnivoice_enabled,
+            tts_providers=tts_providers if tts_providers is not None else {},
+        )
+        set_loop(asyncio.get_event_loop())
+        app.config['TESTING'] = True
+        return app
+
+    return _build
+
+
+@pytest.fixture
 def flask_client(mock_bot, mock_music_bot, mock_music_service):
     from flask_routes import create_flask_app
 

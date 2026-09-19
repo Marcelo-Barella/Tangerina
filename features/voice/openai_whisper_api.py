@@ -2,7 +2,13 @@ import os
 from typing import BinaryIO, Optional
 
 WHISPER_API_MODEL = "whisper-1"
-TRANSCRIPTION_TIMEOUT = float(os.getenv("WHISPER_TRANSCRIPTION_TIMEOUT", "30"))
+
+
+def whisper_transcription_timeout() -> float:
+    return float(os.getenv("WHISPER_TRANSCRIPTION_TIMEOUT", "30"))
+
+
+TRANSCRIPTION_TIMEOUT = whisper_transcription_timeout()
 DEFAULT_WHISPER_LANGUAGE = os.getenv("WHISPER_LANGUAGE", "pt")
 
 
