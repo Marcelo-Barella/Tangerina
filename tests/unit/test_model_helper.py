@@ -593,6 +593,19 @@ class TestDeriveActionReply:
         ]
         assert resolve_tool_response(tool_calls) == "Erro ao executar ação: Channel not found"
 
+    def test_fallback_prefers_latest_failed_tool_over_earlier_success(self, test_chatbot):
+        tool_calls = [
+            {
+                "tool": "EnterChannel",
+                "result": {"success": True, "channel_name": "Geral"},
+            },
+            {
+                "tool": "MusicPlay",
+                "result": {"success": False, "error": "User not in voice"},
+            },
+        ]
+        assert resolve_tool_response(tool_calls) == "Erro ao executar ação: User not in voice"
+
     def test_suppressed_llm_text_uses_action_reply(self, test_chatbot):
         tool_calls = [
             {

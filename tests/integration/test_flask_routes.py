@@ -139,6 +139,102 @@ class TestEnterChannelEndpoint:
         response = flask_client.post('/enter-channel', json={'guild_id': 'invalid', 'channel_id': 456})
         assert response.status_code == 400
 
+    def test_enter_channel_bot_not_ready_returns_503(self, mock_bot, mock_music_bot, mock_music_service):
+        from flask_routes import create_flask_app
+
+        mock_bot.is_ready.return_value = False
+        app, set_loop = create_flask_app(
+            mock_bot,
+            mock_music_bot,
+            mock_music_service,
+            MagicMock(),
+            AsyncMock(),
+            True,
+        )
+        set_loop(asyncio.get_event_loop())
+        app.config['TESTING'] = True
+
+        with app.test_client() as client:
+            response = client.post(
+                '/enter-channel',
+                json={'guild_id': 123, 'channel_id': 456},
+            )
+
+        assert response.status_code == 503
+        data = json.loads(response.data)
+        assert 'not ready' in data['error'].lower()
+
+    def test_enter_channel_without_bot_loop_returns_503(
+        self, mock_bot, mock_music_bot, mock_music_service
+    ):
+        from flask_routes import create_flask_app
+
+        app, _set_loop = create_flask_app(
+            mock_bot,
+            mock_music_bot,
+            mock_music_service,
+            MagicMock(),
+            AsyncMock(),
+            True,
+        )
+        app.config['TESTING'] = True
+
+        with app.test_client() as client:
+            response = client.post(
+                '/enter-channel',
+                json={'guild_id': 123, 'channel_id': 456},
+            )
+
+        assert response.status_code == 503
+
+    def test_enter_channel_success_returns_200(self, flask_client):
+        voice_client = MagicMock()
+        voice_client.channel.name = 'Geral'
+        with patch('flask_routes.asyncio.run_coroutine_threadsafe') as mock_run:
+            mock_future = MagicMock()
+            mock_future.result.return_value = voice_client
+            mock_run.return_value = mock_future
+            response = flask_client.post(
+                '/enter-channel',
+                json={'guild_id': 123, 'channel_id': 456},
+            )
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data['success'] is True
+        assert data['channel_name'] == 'Geral'
+        assert data['guild_id'] == 123
+        assert data['channel_id'] == 456
+
+    def test_enter_channel_join_failure_returns_500(self, flask_client):
+        with patch('flask_routes.asyncio.run_coroutine_threadsafe') as mock_run:
+            mock_future = MagicMock()
+            mock_future.result.return_value = None
+            mock_run.return_value = mock_future
+            response = flask_client.post(
+                '/enter-channel',
+                json={'guild_id': 123, 'channel_id': 456},
+            )
+
+        assert response.status_code == 500
+        data = json.loads(response.data)
+        assert data['error'] == 'Failed to join voice channel'
+
+    def test_enter_channel_pynacl_error_includes_solution(self, flask_client):
+        with patch('flask_routes.asyncio.run_coroutine_threadsafe') as mock_run:
+            mock_future = MagicMock()
+            mock_future.result.side_effect = RuntimeError('PyNaCl library needed for voice')
+            mock_run.return_value = mock_future
+            response = flask_client.post(
+                '/enter-channel',
+                json={'guild_id': 123, 'channel_id': 456},
+            )
+
+        assert response.status_code == 500
+        data = json.loads(response.data)
+        assert 'PyNaCl' in data['error']
+        assert data['solution'] == 'pip install PyNaCl'
+
 @pytest.mark.integration
 class TestLeaveChannelEndpoint:
     def test_leave_channel_missing_guild_id_returns_400(self, flask_client):
@@ -162,6 +258,32 @@ class TestUserVoiceChannelEndpoint:
     def test_user_voice_channel_invalid_user_id_type_returns_400(self, flask_client):
         response = flask_client.get('/user/voice-channel?guild_id=123&user_id=invalid')
         assert response.status_code == 400
+
+    def test_user_voice_channel_not_found_returns_404(self, flask_client):
+        with patch('flask_routes.asyncio.run_coroutine_threadsafe') as mock_run:
+            mock_future = MagicMock()
+            mock_future.result.return_value = {
+                'success': False,
+                'error': 'User not found in a voice channel',
+            }
+            mock_run.return_value = mock_future
+            response = flask_client.get('/user/voice-channel?guild_id=123&user_id=456')
+
+        assert response.status_code == 404
+        data = json.loads(response.data)
+        assert data['success'] is False
+
+    def test_user_voice_channel_generic_failure_returns_500(self, flask_client):
+        with patch('flask_routes.asyncio.run_coroutine_threadsafe') as mock_run:
+            mock_future = MagicMock()
+            mock_future.result.return_value = {
+                'success': False,
+                'error': 'Gateway timeout',
+            }
+            mock_run.return_value = mock_future
+            response = flask_client.get('/user/voice-channel?guild_id=123&user_id=456')
+
+        assert response.status_code == 500
 
 @pytest.mark.integration
 class TestChatbotMessageEndpoint:
@@ -192,6 +314,21 @@ class TestTTSSpeakEndpoint:
     def test_tts_speak_empty_text_returns_400(self, flask_client):
         response = flask_client.post('/tts/speak', json={'guild_id': 123, 'channel_id': 456, 'text': ''})
         assert response.status_code == 400
+
+    def test_tts_speak_timeout_returns_504(self, flask_client):
+        with patch('flask_routes.asyncio.run_coroutine_threadsafe') as mock_run:
+            mock_future = MagicMock()
+            mock_future.result.side_effect = TimeoutError()
+            mock_run.return_value = mock_future
+            response = flask_client.post(
+                '/tts/speak',
+                json={'guild_id': 123, 'channel_id': 456, 'text': 'test'},
+            )
+
+        assert response.status_code == 504
+        data = json.loads(response.data)
+        assert data['success'] is False
+        assert 'timed out' in data['error'].lower()
 
 @pytest.mark.integration
 class TestOmnivoiceSpeakEndpoint:

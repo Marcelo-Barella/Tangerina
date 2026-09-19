@@ -57,3 +57,8 @@ class TestOpenaiWhisperApi:
             second = whisper_transcription_timeout()
         assert first == 45.0
         assert second == 12.5
+
+    def test_whisper_transcription_timeout_rejects_invalid_env(self):
+        with patch.dict(os.environ, {"WHISPER_TRANSCRIPTION_TIMEOUT": "abc"}):
+            with pytest.raises(ValueError):
+                whisper_transcription_timeout()
