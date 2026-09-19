@@ -575,6 +575,69 @@ class TestDeriveActionReply:
         ]
         assert resolve_tool_response(tool_calls, content="Ainda estou no canal.") == "Saí do canal de voz."
 
+    def test_music_leave_overrides_llm_text(self, test_chatbot):
+        tool_calls = [
+            {
+                "tool": "MusicLeave",
+                "result": {"success": True},
+            }
+        ]
+        assert resolve_tool_response(tool_calls, content="Ainda estou no canal.") == "Saí do canal de voz."
+
+    def test_failed_tool_in_fallback_returns_error(self, test_chatbot):
+        tool_calls = [
+            {
+                "tool": "EnterChannel",
+                "result": {"success": False, "error": "Channel not found"},
+            }
+        ]
+        assert resolve_tool_response(tool_calls) == "Erro ao executar ação: Channel not found"
+
+    def test_suppressed_llm_text_uses_action_reply(self, test_chatbot):
+        tool_calls = [
+            {
+                "tool": "EnterChannel",
+                "result": {"success": True, "channel_name": "Geral"},
+            }
+        ]
+        assert resolve_tool_response(tool_calls, content="Ação executada.") == "Pronto, entrei no Geral!"
+
+    def test_music_play_only_fallback_uses_default(self, test_chatbot):
+        tool_calls = [
+            {
+                "tool": "MusicPlay",
+                "result": {"success": True, "message": "Now playing: song"},
+            }
+        ]
+        assert resolve_tool_response(tool_calls) == "Ação executada."
+
+    def test_no_tools_or_content_uses_default(self, test_chatbot):
+        assert resolve_tool_response([]) == "Ação executada."
+
+    def test_suppressed_sucesso_uses_action_reply(self, test_chatbot):
+        tool_calls = [
+            {
+                "tool": "EnterChannel",
+                "result": {"success": True, "channel_name": "Geral"},
+            }
+        ]
+        assert resolve_tool_response(
+            tool_calls,
+            content="Ação executada com sucesso!",
+        ) == "Pronto, entrei no Geral!"
+
+    def test_enter_channel_without_channel_name_uses_default(self, test_chatbot):
+        tool_calls = [
+            {
+                "tool": "EnterChannel",
+                "result": {"success": True},
+            }
+        ]
+        assert resolve_tool_response(tool_calls) == "Pronto, entrei no canal de voz!"
+
+    def test_send_mensagem_executed_without_content_returns_empty(self, test_chatbot):
+        assert resolve_tool_response([], send_mensagem_executed=True) == ""
+
 
 @pytest.mark.unit
 class TestJoinVoiceHelpers:
@@ -584,8 +647,30 @@ class TestJoinVoiceHelpers:
     def test_is_join_voice_request_rejects_how_to(self):
         assert not is_join_voice_request("explica como entrar no canal de voz")
 
+    def test_is_join_voice_request_rejects_empty(self):
+        assert not is_join_voice_request("   ")
+
+    def test_is_join_voice_request_rejects_disconnect_substring(self):
+        assert not is_join_voice_request("desconecta da chamada")
+
+    def test_is_join_voice_request_rejects_negation_before_verb(self):
+        assert not is_join_voice_request("não entra na chamada")
+        assert not is_join_voice_request("nao entra no canal de voz")
+
+    def test_is_join_voice_request_rejects_nunca_and_jamais(self):
+        assert not is_join_voice_request("nunca entra na chamada")
+        assert not is_join_voice_request("jamais entra no canal de voz")
+
+    def test_is_join_voice_request_matches_reversed_chamada_entra(self):
+        assert is_join_voice_request("na chamada entra agora")
+        assert is_join_voice_request("canal de voz join")
+
     def test_text_claims_voice_join_matches_entrei_na_chamada(self):
         assert text_claims_voice_join("@1389316439193944275, entrei na chamada!")
+
+    def test_text_claims_voice_join_rejects_unrelated_text(self):
+        assert not text_claims_voice_join("entrei no servidor")
+        assert not text_claims_voice_join("")
 
     @pytest.mark.asyncio
     async def test_auto_enter_after_user_voice_channel(self, test_chatbot):

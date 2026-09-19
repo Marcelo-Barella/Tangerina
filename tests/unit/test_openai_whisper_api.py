@@ -1,3 +1,4 @@
+import os
 from io import BytesIO
 from unittest.mock import MagicMock, patch
 
@@ -6,6 +7,7 @@ import pytest
 from features.voice.openai_whisper_api import (
     WHISPER_API_MODEL,
     transcribe_openai_whisper,
+    whisper_transcription_timeout,
 )
 
 
@@ -42,3 +44,16 @@ class TestOpenaiWhisperApi:
             model=WHISPER_API_MODEL,
             file=audio,
         )
+
+    def test_whisper_transcription_timeout_defaults_to_30(self):
+        with patch.dict(os.environ):
+            os.environ.pop("WHISPER_TRANSCRIPTION_TIMEOUT", None)
+            assert whisper_transcription_timeout() == 30.0
+
+    def test_whisper_transcription_timeout_reads_env_at_call_time(self):
+        with patch.dict(os.environ, {"WHISPER_TRANSCRIPTION_TIMEOUT": "45"}):
+            first = whisper_transcription_timeout()
+        with patch.dict(os.environ, {"WHISPER_TRANSCRIPTION_TIMEOUT": "12.5"}):
+            second = whisper_transcription_timeout()
+        assert first == 45.0
+        assert second == 12.5

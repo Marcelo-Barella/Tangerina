@@ -1,9 +1,13 @@
 import asyncio
 import logging
 import os
-from flask import Flask, request, jsonify
+from flask import Flask, after_this_request, jsonify, request, send_file
 from features.music.music_service import MusicService
 from features.music.music_bot import MusicBot
+from features.tts.http_tts import cleanup_tts_file
+from features.voice.openai_whisper_api import whisper_transcription_timeout
+
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +22,9 @@ def create_flask_app(
     chatbot,
     speak_tts_func,
     omnivoice_enabled=False,
+    tts_providers=None,
 ):
+    tts_providers = tts_providers or {}
     flask_app = Flask(__name__)
     bot_loop = None
 
@@ -260,6 +266,77 @@ def create_flask_app(
             'OmniVoice TTS request timed out',
             provider='omnivoice',
         )
+
+    @flask_app.route('/tts/preview', methods=['POST'])
+    def tts_preview():
+        request_data = request.get_json() or {}
+        text = request_data.get('text')
+        if not text:
+            return jsonify({'error': 'text is required'}), 400
+
+        provider = (request_data.get('provider') or 'piper').lower()
+        if provider == 'elevenlabs':
+            return jsonify({'error': 'elevenlabs preview is not supported'}), 400
+        if provider not in tts_providers or not tts_providers[provider]:
+            return jsonify({'error': f'TTS provider {provider!r} is not configured'}), 503
+
+        tts_client = tts_providers[provider]
+        output_path = None
+        try:
+            output_path = tts_client.generate_speech(text)
+        except Exception as preview_error:
+            logger.error("TTS preview failed for provider %s: %s", provider, preview_error)
+            return jsonify({'error': str(preview_error)}), 500
+
+        @after_this_request
+        def _remove_preview_file(response):
+            if output_path:
+                cleanup_tts_file(output_path)
+            return response
+
+        return send_file(
+            output_path,
+            mimetype='audio/wav',
+            as_attachment=False,
+            download_name='preview.wav',
+        )
+
+    @flask_app.route('/stt/transcribe', methods=['POST'])
+    def stt_transcribe():
+        uploaded = request.files.get('file')
+        if uploaded is None:
+            return jsonify({'error': 'file is required'}), 400
+
+        whisper_api_url = os.getenv('WHISPER_API_URL', 'http://whisper-asr:5002').rstrip('/')
+        prompt = (request.form.get('prompt') or os.getenv('WHISPER_INITIAL_PROMPT') or '').strip()
+
+        try:
+            files = {'file': (uploaded.filename or 'audio.wav', uploaded.stream, uploaded.mimetype or 'audio/wav')}
+            data = {'prompt': prompt} if prompt else None
+            response = requests.post(
+                f'{whisper_api_url}/transcribe',
+                files=files,
+                data=data,
+                timeout=whisper_transcription_timeout(),
+            )
+        except requests.exceptions.Timeout:
+            return jsonify({'error': 'Whisper transcription timed out'}), 504
+        except requests.exceptions.RequestException as request_error:
+            logger.error('Whisper sidecar proxy error: %s', request_error)
+            return jsonify({'error': str(request_error)}), 502
+
+        if response.status_code != 200:
+            try:
+                error_body = response.json()
+            except ValueError:
+                error_body = {'error': response.text[:200]}
+            return jsonify(error_body), response.status_code
+
+        try:
+            payload = response.json()
+        except ValueError:
+            return jsonify({'error': 'Invalid JSON from Whisper sidecar'}), 502
+        return jsonify({'text': payload.get('text', '').strip()}), 200
 
     @flask_app.route('/chatbot/message', methods=['POST'])
     @require_bot_ready
