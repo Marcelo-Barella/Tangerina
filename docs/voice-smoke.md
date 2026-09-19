@@ -4,7 +4,7 @@ Use this harness to verify Piper, Whisper, and optional OmniVoice sidecars (and 
 
 ## Prerequisites
 
-- Network access to the host running Tangerina (Aspire or local Docker).
+- Network access to the host running Tangerina (remote server or local Docker).
 - Sidecars healthy on ports **5001** (Piper), **5002** (Whisper), and optionally **5003** (OmniVoice).
 - Bot API on **5000** only if you test `/tts/preview` and `/stt/transcribe`.
 
@@ -18,8 +18,8 @@ chmod +x scripts/smoke_voice_roundtrip.sh
 # Local Docker (default URLs http://127.0.0.1:5001–5003)
 ./scripts/smoke_voice_roundtrip.sh
 
-# Aspire / remote host (replace with your Tailscale or LAN address)
-BASE_URL=http://marcelo-aspire.taila3454d.ts.net ./scripts/smoke_voice_roundtrip.sh
+# Remote host (replace with your Tailscale or LAN address)
+BASE_URL=http://<host> ./scripts/smoke_voice_roundtrip.sh
 
 # Include OmniVoice TTS in the same STT check
 RUN_OMNIVOICE=1 BASE_URL=http://<host> ./scripts/smoke_voice_roundtrip.sh

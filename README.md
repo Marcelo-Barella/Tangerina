@@ -953,7 +953,7 @@ Os serviços incluem health checks automáticos:
 
 ### Voice smoke (sem Discord)
 
-Para validar TTS + STT (Piper/Whisper e rotas Flask `/tts/preview`, `/stt/transcribe`) sem entrar em canal de voz, veja [docs/voice-smoke.md](docs/voice-smoke.md) e execute `scripts/smoke_voice_roundtrip.sh` contra o host Aspire ou local.
+Para validar TTS + STT (Piper/Whisper e rotas Flask `/tts/preview`, `/stt/transcribe`) sem entrar em canal de voz, veja [docs/voice-smoke.md](docs/voice-smoke.md) e execute `scripts/smoke_voice_roundtrip.sh` contra o host remoto ou local.
 
 ### Variáveis de Ambiente no Docker
 
