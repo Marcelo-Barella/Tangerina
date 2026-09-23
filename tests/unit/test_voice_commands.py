@@ -10,7 +10,6 @@ from features.voice.voice_commands import (
     LISTENING_DURATION,
     WHISPER_INITIAL_PROMPT,
     VoiceCommandSink,
-    VOICE_CRYPTO_RECONNECT_DEBOUNCE_SEC,
     CRYPTO_ERROR_BURST_THRESHOLD,
 )
 from features.voice import whisper_stt
