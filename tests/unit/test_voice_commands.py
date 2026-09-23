@@ -10,7 +10,10 @@ from features.voice.voice_commands import (
     LISTENING_DURATION,
     WHISPER_INITIAL_PROMPT,
     VoiceCommandSink,
+    VOICE_CRYPTO_RECONNECT_DEBOUNCE_SEC,
+    CRYPTO_ERROR_BURST_THRESHOLD,
 )
+from features.voice import whisper_stt
 from tests.conftest import TEST_GUILD_ID
 
 SPEECH_PCM_CHUNK = b'\xff\x7f' * 1920
@@ -302,6 +305,37 @@ class TestVoiceCommandSinkListeningMode:
 
 @pytest.mark.unit
 class TestVoiceCommandSinkTranscription:
+    @pytest.mark.asyncio
+    async def test_process_speech_skips_when_stt_gate_closed(self, sink_instance):
+        sink, _, _, _ = sink_instance
+        sink._stt_accepting = False
+        sink._transcribe_audio = AsyncMock()
+
+        mock_member = MagicMock(spec=discord.Member)
+        mock_member.id = 999
+        _fill_speech_buffer(sink, 999)
+
+        await sink.process_speech(mock_member)
+
+        sink._transcribe_audio.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_process_speech_rejects_prompt_hallucination(self, sink_instance):
+        sink, _, _, _ = sink_instance
+        sink._route_speech = AsyncMock()
+        sink._transcribe_audio = AsyncMock(
+            return_value="comandos de voz fila de música volume",
+        )
+
+        mock_member = MagicMock(spec=discord.Member)
+        mock_member.id = 999
+        _fill_speech_buffer(sink, 999)
+
+        await sink.process_speech(mock_member)
+
+        sink._transcribe_audio.assert_called_once()
+        sink._route_speech.assert_not_called()
+
     @pytest.mark.asyncio
     async def test_process_speech_requires_minimum_chunks(self, sink_instance):
         sink, _, _, _ = sink_instance
@@ -617,7 +651,7 @@ class TestVoiceCommandSinkTranscriptionProviders:
                 'features.voice.voice_commands.transcribe_openai_whisper',
                 return_value='toca música',
             ):
-                result = await sink._transcribe_openai_api(audio_data)
+                result = await sink._transcribe_openai_api(audio_data, WHISPER_INITIAL_PROMPT)
 
         assert result == 'toca música'
 
@@ -638,7 +672,7 @@ class TestVoiceCommandSinkTranscriptionProviders:
         )
 
         import io
-        result = await sink._transcribe_openai_api(io.BytesIO(b'RIFF'))
+        result = await sink._transcribe_openai_api(io.BytesIO(b'RIFF'), WHISPER_INITIAL_PROMPT)
         assert result is None
 
     @pytest.mark.asyncio
@@ -663,10 +697,10 @@ class TestVoiceCommandSinkTranscriptionProviders:
                 mock_post_cm.__aexit__ = AsyncMock(return_value=None)
                 mock_session.return_value.__aenter__.return_value.post = MagicMock(return_value=mock_post_cm)
 
-                result = await sink._transcribe_sidecar(audio_data)
+                result = await sink._transcribe_sidecar(audio_data, whisper_stt.SHORT_WHISPER_PROMPT)
 
         assert result == 'toca música'
-        assert captured['prompt'] == WHISPER_INITIAL_PROMPT
+        assert captured['prompt'] == whisper_stt.SHORT_WHISPER_PROMPT
         assert captured['file'] == b'RIFF'
 
     @pytest.mark.asyncio
@@ -678,7 +712,7 @@ class TestVoiceCommandSinkTranscriptionProviders:
         
         with patch('aiohttp.ClientSession') as mock_session:
             mock_session.return_value.__aenter__.return_value.post.side_effect = RuntimeError()
-            result = await sink._transcribe_sidecar(audio_data)
+            result = await sink._transcribe_sidecar(audio_data, whisper_stt.SHORT_WHISPER_PROMPT)
             assert result is None
 
 
@@ -837,7 +871,7 @@ class TestVoiceCommandErrorHandling:
         
         with patch('aiohttp.ClientSession') as mock_session:
             mock_session.return_value.__aenter__.return_value.post.side_effect = asyncio.TimeoutError()
-            result = await sink._transcribe_sidecar(audio_data)
+            result = await sink._transcribe_sidecar(audio_data, whisper_stt.SHORT_WHISPER_PROMPT)
             assert result is None
 
     @pytest.mark.asyncio
@@ -855,7 +889,7 @@ class TestVoiceCommandErrorHandling:
             mock_post = AsyncMock(return_value=mock_response)
             mock_session.return_value.__aenter__.return_value.post = mock_post
             
-            result = await sink._transcribe_sidecar(audio_data)
+            result = await sink._transcribe_sidecar(audio_data, whisper_stt.SHORT_WHISPER_PROMPT)
             assert result is None
 
     @pytest.mark.asyncio
@@ -878,7 +912,7 @@ class TestVoiceCommandErrorHandling:
         
         with patch('aiohttp.ClientSession') as mock_session:
             mock_session.return_value.__aenter__.return_value.post.side_effect = asyncio.TimeoutError()
-            result = await sink._transcribe_zhipu(audio_data)
+            result = await sink._transcribe_zhipu(audio_data, WHISPER_INITIAL_PROMPT)
             assert result is None
 
     @pytest.mark.asyncio
@@ -907,7 +941,7 @@ class TestVoiceCommandErrorHandling:
             mock_post = AsyncMock(return_value=mock_response)
             mock_session.return_value.__aenter__.return_value.post = mock_post
             
-            result = await sink._transcribe_zhipu(audio_data)
+            result = await sink._transcribe_zhipu(audio_data, WHISPER_INITIAL_PROMPT)
             assert result is None
 
     def test_write_corrupt_audio_data(self, sink_instance):
@@ -1060,3 +1094,41 @@ class TestVoiceRecvPatches:
         voice_recv_patches.apply_voice_recv_patches()
         voice_recv_patches.apply_voice_recv_patches()
         assert voice_recv_patches._patched is True
+
+    def test_crypto_reader_patch_is_idempotent(self):
+        from features.voice import voice_recv_patches
+
+        voice_recv_patches._crypto_patched = False
+        voice_recv_patches._patch_audio_reader_crypto_resync()
+        voice_recv_patches._patch_audio_reader_crypto_resync()
+        assert voice_recv_patches._crypto_patched is True
+
+
+@pytest.mark.unit
+class TestVoiceCommandSinkCryptoRecovery:
+    @pytest.mark.asyncio
+    async def test_note_crypto_error_debounces_recovery(self, sink_instance):
+        import time
+
+        sink, _, _, _ = sink_instance
+        sink._schedule_listen_recovery = MagicMock()
+        sink._last_crypto_reconnect_at = 0.0
+        sink._crypto_error_window_start = time.monotonic()
+        sink._crypto_error_count = CRYPTO_ERROR_BURST_THRESHOLD - 1
+
+        sink.note_crypto_error()
+
+        sink._schedule_listen_recovery.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_note_crypto_error_respects_debounce_window(self, sink_instance):
+        import time
+
+        sink, _, _, _ = sink_instance
+        sink._schedule_listen_recovery = MagicMock()
+        sink._last_crypto_reconnect_at = time.monotonic()
+        sink._crypto_error_count = CRYPTO_ERROR_BURST_THRESHOLD
+
+        sink.note_crypto_error()
+
+        sink._schedule_listen_recovery.assert_not_called()

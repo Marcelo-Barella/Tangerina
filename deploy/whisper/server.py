@@ -3,6 +3,7 @@ import os
 import tempfile
 import logging
 import threading
+import wave
 
 from flask import Flask, jsonify, request
 
@@ -11,6 +12,12 @@ from features.voice.openai_whisper_api import (
     TRANSCRIPTION_TIMEOUT,
     build_openai_whisper_client,
     transcribe_openai_whisper,
+)
+from features.voice.whisper_stt import (
+    filter_transcript,
+    log_clip_metrics,
+    select_whisper_prompt,
+    wav_duration_seconds,
 )
 
 try:
@@ -25,7 +32,14 @@ OPENAI_API_KEY = (os.getenv("OPENAI_API_KEY") or "").strip()
 WHISPER_MODEL_NAME = os.getenv("WHISPER_MODEL", "base")
 WHISPER_LANGUAGE = os.getenv("WHISPER_LANGUAGE", DEFAULT_WHISPER_LANGUAGE)
 WHISPER_PORT = int(os.getenv("WHISPER_PORT", "5002"))
-WHISPER_INITIAL_PROMPT = os.getenv("WHISPER_INITIAL_PROMPT", "")
+WHISPER_INITIAL_PROMPT = os.getenv(
+    "WHISPER_INITIAL_PROMPT",
+    (
+        "Transcreva em português brasileiro. Comandos de voz para o assistente musical Tangerina: "
+        "toca a música, para a música, pula a música, pausa a música, continua a música, "
+        "fila de música, volume, tangerina."
+    ),
+)
 
 _openai_client = None
 _local_model = None
@@ -84,7 +98,35 @@ def transcribe():
             tmp_path = tmp.name
 
         language_param = WHISPER_LANGUAGE if WHISPER_LANGUAGE else None
-        prompt = (request.form.get("prompt") or WHISPER_INITIAL_PROMPT or "").strip()
+        requested_prompt = (request.form.get("prompt") or "").strip()
+        duration_sec = 0.0
+        try:
+            with open(tmp_path, "rb") as wav_file:
+                duration_sec = wav_duration_seconds(wav_file)
+        except Exception:
+            duration_sec = 0.0
+        if requested_prompt:
+            prompt = requested_prompt
+            full_prompt = requested_prompt
+        else:
+            full_prompt = (WHISPER_INITIAL_PROMPT or "").strip()
+            prompt = select_whisper_prompt(full_prompt, duration_sec)
+        try:
+            import audioop
+
+            with wave.open(tmp_path, "rb") as wav_file:
+                pcm = wav_file.readframes(wav_file.getnframes())
+                rms = audioop.rms(pcm, wav_file.getsampwidth())
+            log_clip_metrics(
+                {
+                    "duration_sec": duration_sec,
+                    "rms": rms,
+                    "wav_bytes": os.path.getsize(tmp_path),
+                    "pcm_bytes": len(pcm),
+                }
+            )
+        except Exception as metric_error:
+            logger.debug("Could not log sidecar clip metrics: %s", metric_error)
         with _transcribe_lock:
             if _use_openai_api():
                 with open(tmp_path, "rb") as audio_file:
@@ -96,6 +138,7 @@ def transcribe():
                     )
             else:
                 text_response = _transcribe_local(tmp_path, language_param, prompt)
+        text_response = filter_transcript(text_response, full_prompt) or ""
         logger.info(f"Transcribe response: {text_response}")
         return jsonify({"text": text_response}), 200
     except Exception as exc:

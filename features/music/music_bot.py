@@ -148,12 +148,14 @@ class MusicBot:
                     vc.listen(sink)
                 self.voice_sinks[guild_id] = sink
                 sink._start_health_monitor()
+                sink.schedule_join_ready_flow()
             else:
                 sink = self.voice_sinks[guild_id]
                 sink._voice_client = vc
                 if hasattr(vc, 'listen'):
                     vc.listen(sink)
                 sink._start_health_monitor()
+                sink.schedule_join_ready_flow()
         else:
             vc = await channel.connect()
             self.voice_clients[guild_id] = vc
@@ -296,6 +298,7 @@ class MusicBot:
                 self.voice_clients[guild_id] = vc
                 sink._voice_client = vc
             sink._start_health_monitor()
+            sink.schedule_join_ready_flow()
             sink.last_audio_timestamps.clear()
             logger.info(f"Successfully reconnected voice client for guild {guild_id}")
             return vc

@@ -31,6 +31,11 @@ AUDIO_CHANNELS = 1
 LISTENING_VOLUME = 20
 CONNECTION_HEALTH_CHECK_INTERVAL = 5.0
 CONNECTION_TIMEOUT = 10.0
+VOICE_STT_WARMUP_SEC = float(os.getenv('VOICE_STT_WARMUP_SEC', '1.5'))
+VOICE_JOIN_READY_PHRASE = os.getenv('VOICE_JOIN_READY_PHRASE', 'Tangerina pronta.')
+VOICE_RECONNECT_DEBOUNCE_SEC = float(os.getenv('VOICE_RECONNECT_DEBOUNCE_SEC', '10'))
+VOICE_CRYPTO_RECONNECT_DEBOUNCE_SEC = float(os.getenv('VOICE_CRYPTO_RECONNECT_DEBOUNCE_SEC', '15'))
+CRYPTO_ERROR_BURST_THRESHOLD = int(os.getenv('VOICE_CRYPTO_ERROR_BURST', '8'))
 WHISPER_INITIAL_PROMPT = os.getenv(
     'WHISPER_INITIAL_PROMPT',
     (
@@ -59,6 +64,12 @@ from features.voice.openai_whisper_api import (
     TRANSCRIPTION_TIMEOUT,
     build_openai_whisper_client,
     transcribe_openai_whisper,
+)
+from features.voice.whisper_stt import (
+    compute_clip_metrics,
+    filter_transcript,
+    log_clip_metrics,
+    select_whisper_prompt,
 )
 
 try:
@@ -116,6 +127,13 @@ class VoiceCommandSink(BaseSink):
         self._health_monitor_started: bool = False
         self._transcribe_lock = asyncio.Lock()
         self._openai_whisper_client = None
+        self._stt_accepting = True
+        self._post_join_ignore_until = 0.0
+        self._last_reconnect_attempt_at = 0.0
+        self._last_crypto_reconnect_at = 0.0
+        self._crypto_error_count = 0
+        self._crypto_error_window_start = 0.0
+        self._join_ready_task: Optional[asyncio.Task] = None
         self._validate_provider_config()
 
     def _validate_provider_config(self) -> None:
@@ -198,7 +216,94 @@ class VoiceCommandSink(BaseSink):
             else:
                 logger.error("No running event loop available to process speech")
 
+    def begin_post_join_stt_gate(self) -> None:
+        self._stt_accepting = False
+        self._post_join_ignore_until = time.monotonic() + VOICE_STT_WARMUP_SEC
+        self.audio_buffers.clear()
+        self.speaking_users.clear()
+
+    def note_crypto_error(self) -> None:
+        now = time.monotonic()
+        if now - self._crypto_error_window_start > 10.0:
+            self._crypto_error_window_start = now
+            self._crypto_error_count = 0
+        self._crypto_error_count += 1
+        if self._crypto_error_count < CRYPTO_ERROR_BURST_THRESHOLD:
+            return
+        self._crypto_error_count = 0
+        if now - self._last_crypto_reconnect_at < VOICE_CRYPTO_RECONNECT_DEBOUNCE_SEC:
+            return
+        self._last_crypto_reconnect_at = now
+        logger.warning(
+            "CryptoError burst on guild %s; scheduling voice listener recovery",
+            self.guild_id,
+        )
+        self._schedule_listen_recovery()
+
+    def schedule_join_ready_flow(self) -> None:
+        loop = self._get_event_loop()
+        if not loop or not loop.is_running():
+            return
+        if self._join_ready_task and not self._join_ready_task.done():
+            self._join_ready_task.cancel()
+        self.begin_post_join_stt_gate()
+        self._join_ready_task = asyncio.run_coroutine_threadsafe(
+            self._run_join_ready_flow(),
+            loop,
+        )
+
+    async def _run_join_ready_flow(self) -> None:
+        try:
+            await self._play_join_ready_cue()
+        finally:
+            self._stt_accepting = True
+            self._post_join_ignore_until = max(
+                self._post_join_ignore_until,
+                time.monotonic() + 0.3,
+            )
+
+    async def _play_join_ready_cue(self) -> None:
+        if not self.speak_tts_func:
+            await asyncio.sleep(VOICE_STT_WARMUP_SEC)
+            return
+        if 'piper' not in self.tts_providers or not self.tts_providers['piper']:
+            await asyncio.sleep(VOICE_STT_WARMUP_SEC)
+            return
+        voice_client = self._voice_client
+        if not voice_client or not voice_client.is_connected() or not voice_client.channel:
+            await asyncio.sleep(VOICE_STT_WARMUP_SEC)
+            return
+        phrase = (VOICE_JOIN_READY_PHRASE or '').strip()
+        if not phrase:
+            await asyncio.sleep(VOICE_STT_WARMUP_SEC)
+            return
+        try:
+            result = await self.speak_tts_func(
+                self.guild_id,
+                voice_client.channel.id,
+                phrase,
+                'piper',
+            )
+            if isinstance(result, dict) and not result.get('success', True):
+                logger.warning(
+                    "Join-ready TTS failed for guild %s: %s",
+                    self.guild_id,
+                    result.get('error'),
+                )
+                await asyncio.sleep(VOICE_STT_WARMUP_SEC)
+                return
+            deadline = time.monotonic() + 15.0
+            while voice_client.is_playing() and time.monotonic() < deadline:
+                await asyncio.sleep(0.1)
+        except Exception as e:
+            logger.warning("Join-ready TTS error for guild %s: %s", self.guild_id, e)
+            await asyncio.sleep(VOICE_STT_WARMUP_SEC)
+
     async def process_speech(self, member: discord.Member) -> None:
+        if not self._stt_accepting:
+            return
+        if time.monotonic() < self._post_join_ignore_until:
+            return
         if member.id not in self.audio_buffers:
             return
         audio_chunks = list(self.audio_buffers[member.id])
@@ -210,12 +315,25 @@ class VoiceCommandSink(BaseSink):
             return
         try:
             audio_data = self._combine_audio_chunks(audio_chunks)
+            metrics = compute_clip_metrics(
+                combined_pcm,
+                audio_data,
+                sample_rate=AUDIO_SAMPLE_RATE,
+                sample_width=AUDIO_SAMPLE_WIDTH,
+                channels=AUDIO_CHANNELS,
+            )
+            log_clip_metrics(metrics, guild_id=self.guild_id)
+            whisper_prompt = select_whisper_prompt(
+                WHISPER_INITIAL_PROMPT,
+                metrics['duration_sec'],
+            )
             async with self._transcribe_lock:
-                text = await self._transcribe_audio(audio_data)
-            if not text or not text.strip():
+                text = await self._transcribe_audio(audio_data, whisper_prompt)
+            text = filter_transcript(text, WHISPER_INITIAL_PROMPT)
+            if not text:
                 return
             logger.info(f"Transcribed from {member.display_name}: {text}")
-            await self._route_speech(member, text.strip())
+            await self._route_speech(member, text)
         except Exception as e:
             logger.error(f"Error processing speech from {member.display_name}: {e}")
 
@@ -273,8 +391,13 @@ class VoiceCommandSink(BaseSink):
             logger.error(f"Failed to load Whisper model: {e}")
             return None
 
-    async def _transcribe_audio(self, audio_data: io.BytesIO) -> Optional[str]:
-        provider_map: Dict[str, Callable[[io.BytesIO], Any]] = {
+    async def _transcribe_audio(
+        self,
+        audio_data: io.BytesIO,
+        whisper_prompt: Optional[str] = None,
+    ) -> Optional[str]:
+        prompt = whisper_prompt if whisper_prompt is not None else WHISPER_INITIAL_PROMPT
+        provider_map: Dict[str, Callable[[io.BytesIO, str], Any]] = {
             'openai-api': self._transcribe_openai_api,
             'openai': self._transcribe_openai_local,
             'sidecar': self._transcribe_sidecar,
@@ -282,9 +405,9 @@ class VoiceCommandSink(BaseSink):
         }
         handler = provider_map.get(self.whisper_provider)
         if handler:
-            return await handler(audio_data)
+            return await handler(audio_data, prompt)
         logger.warning("Unknown WHISPER_PROVIDER %r, falling back to zhipu", self.whisper_provider)
-        return await self._transcribe_zhipu(audio_data)
+        return await self._transcribe_zhipu(audio_data, prompt)
 
     def _get_openai_whisper_client(self):
         if self._openai_whisper_client is None:
@@ -294,7 +417,7 @@ class VoiceCommandSink(BaseSink):
             )
         return self._openai_whisper_client
 
-    async def _transcribe_openai_api(self, audio_data: io.BytesIO) -> Optional[str]:
+    async def _transcribe_openai_api(self, audio_data: io.BytesIO, whisper_prompt: str) -> Optional[str]:
         if not self.openai_api_key:
             logger.error("OPENAI_API_KEY not set for OpenAI Whisper API")
             return None
@@ -305,14 +428,14 @@ class VoiceCommandSink(BaseSink):
                 self._get_openai_whisper_client(),
                 audio_data,
                 language=DEFAULT_WHISPER_LANGUAGE or None,
-                prompt=WHISPER_INITIAL_PROMPT or None,
+                prompt=whisper_prompt or None,
             )
             return text if text else None
         except Exception as e:
             logger.error(f"OpenAI Whisper API transcription error: {e}")
             return None
 
-    async def _transcribe_openai_local(self, audio_data: io.BytesIO) -> Optional[str]:
+    async def _transcribe_openai_local(self, audio_data: io.BytesIO, whisper_prompt: str) -> Optional[str]:
         if whisper is None:
             logger.error("openai-whisper package not installed")
             return None
@@ -329,7 +452,7 @@ class VoiceCommandSink(BaseSink):
                 model.transcribe,
                 tmp_file_path,
                 language=DEFAULT_WHISPER_LANGUAGE or None,
-                initial_prompt=WHISPER_INITIAL_PROMPT,
+                initial_prompt=whisper_prompt or None,
             )
             text = result.get('text', '').strip()
             return text if text else None
@@ -339,13 +462,14 @@ class VoiceCommandSink(BaseSink):
         finally:
             self._cleanup_temp_file(tmp_file_path)
 
-    async def _transcribe_sidecar(self, audio_data: io.BytesIO) -> Optional[str]:
+    async def _transcribe_sidecar(self, audio_data: io.BytesIO, whisper_prompt: str) -> Optional[str]:
         audio_data.seek(0)
         audio_bytes = audio_data.read()
         url = f"{self.whisper_api_url.rstrip('/')}/transcribe"
         data = aiohttp.FormData()
         data.add_field('file', audio_bytes, filename='audio.wav', content_type='audio/wav')
-        data.add_field('prompt', WHISPER_INITIAL_PROMPT)
+        if whisper_prompt:
+            data.add_field('prompt', whisper_prompt)
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, data=data, timeout=aiohttp.ClientTimeout(total=TRANSCRIPTION_TIMEOUT)) as response:
@@ -363,7 +487,7 @@ class VoiceCommandSink(BaseSink):
             logger.error(f"Whisper sidecar transcription error: {e}")
             return None
 
-    async def _transcribe_zhipu(self, audio_data: io.BytesIO) -> Optional[str]:
+    async def _transcribe_zhipu(self, audio_data: io.BytesIO, _whisper_prompt: str) -> Optional[str]:
         if not self.zhipu_api_key:
             return None
         audio_data.seek(0)
@@ -640,6 +764,14 @@ class VoiceCommandSink(BaseSink):
     async def _trigger_reconnection(self) -> None:
         if self._reconnecting:
             return
+        now = time.monotonic()
+        if now - self._last_reconnect_attempt_at < VOICE_RECONNECT_DEBOUNCE_SEC:
+            logger.info(
+                "Skipping voice reconnect for guild %s (debounced)",
+                self.guild_id,
+            )
+            return
+        self._last_reconnect_attempt_at = now
         self._reconnecting = True
         try:
             await self._reconnect_voice_client()
@@ -667,6 +799,7 @@ class VoiceCommandSink(BaseSink):
             if vc:
                 self._voice_client = vc
                 self.last_audio_timestamps.clear()
+                self.schedule_join_ready_flow()
                 logger.info(f"Successfully reconnected voice client for guild {guild_id}")
                 return True
             else:
