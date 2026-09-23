@@ -1,5 +1,6 @@
 import pytest
 import asyncio
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 import discord
 from features.voice.voice_commands import (
@@ -8,11 +9,11 @@ from features.voice.voice_commands import (
     VOLUME_MIN,
     VOLUME_MAX,
     LISTENING_DURATION,
-    WHISPER_INITIAL_PROMPT,
     VoiceCommandSink,
     CRYPTO_ERROR_BURST_THRESHOLD,
 )
 from features.voice import whisper_stt
+from features.voice.whisper_stt import WHISPER_INITIAL_PROMPT
 from tests.conftest import TEST_GUILD_ID
 
 SPEECH_PCM_CHUNK = b'\xff\x7f' * 1920
@@ -1107,8 +1108,6 @@ class TestVoiceRecvPatches:
 class TestVoiceCommandSinkCryptoRecovery:
     @pytest.mark.asyncio
     async def test_note_crypto_error_debounces_recovery(self, sink_instance):
-        import time
-
         sink, _, _, _ = sink_instance
         sink._schedule_listen_recovery = MagicMock()
         sink._last_crypto_reconnect_at = 0.0
@@ -1121,8 +1120,6 @@ class TestVoiceCommandSinkCryptoRecovery:
 
     @pytest.mark.asyncio
     async def test_note_crypto_error_respects_debounce_window(self, sink_instance):
-        import time
-
         sink, _, _, _ = sink_instance
         sink._schedule_listen_recovery = MagicMock()
         sink._last_crypto_reconnect_at = time.monotonic()

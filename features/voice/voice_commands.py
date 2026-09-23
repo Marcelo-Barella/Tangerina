@@ -36,14 +36,6 @@ VOICE_JOIN_READY_PHRASE = os.getenv('VOICE_JOIN_READY_PHRASE', 'Tangerina pronta
 VOICE_RECONNECT_DEBOUNCE_SEC = float(os.getenv('VOICE_RECONNECT_DEBOUNCE_SEC', '10'))
 VOICE_CRYPTO_RECONNECT_DEBOUNCE_SEC = float(os.getenv('VOICE_CRYPTO_RECONNECT_DEBOUNCE_SEC', '15'))
 CRYPTO_ERROR_BURST_THRESHOLD = int(os.getenv('VOICE_CRYPTO_ERROR_BURST', '8'))
-WHISPER_INITIAL_PROMPT = os.getenv(
-    'WHISPER_INITIAL_PROMPT',
-    (
-        'Transcreva em português brasileiro. Comandos de voz para o assistente musical Tangerina: '
-        'toca a música, para a música, pula a música, pausa a música, continua a música, '
-        'fila de música, volume, tangerina.'
-    ),
-)
 
 try:
     from discord.ext import voice_recv
@@ -66,6 +58,7 @@ from features.voice.openai_whisper_api import (
     transcribe_openai_whisper,
 )
 from features.voice.whisper_stt import (
+    WHISPER_INITIAL_PROMPT,
     compute_clip_metrics,
     filter_transcript,
     log_clip_metrics,
@@ -263,18 +256,18 @@ class VoiceCommandSink(BaseSink):
             )
 
     async def _play_join_ready_cue(self) -> None:
-        if not self.speak_tts_func:
-            await asyncio.sleep(VOICE_STT_WARMUP_SEC)
-            return
-        if 'piper' not in self.tts_providers or not self.tts_providers['piper']:
-            await asyncio.sleep(VOICE_STT_WARMUP_SEC)
-            return
         voice_client = self._voice_client
-        if not voice_client or not voice_client.is_connected() or not voice_client.channel:
-            await asyncio.sleep(VOICE_STT_WARMUP_SEC)
-            return
         phrase = (VOICE_JOIN_READY_PHRASE or '').strip()
-        if not phrase:
+        piper_ready = bool(
+            self.speak_tts_func
+            and self.tts_providers.get('piper')
+        )
+        voice_ready = bool(
+            voice_client
+            and voice_client.is_connected()
+            and voice_client.channel
+        )
+        if not piper_ready or not voice_ready or not phrase:
             await asyncio.sleep(VOICE_STT_WARMUP_SEC)
             return
         try:

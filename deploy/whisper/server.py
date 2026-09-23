@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
+import io
 import os
 import tempfile
 import logging
 import threading
-import wave
 
 from flask import Flask, jsonify, request
 
@@ -14,6 +14,8 @@ from features.voice.openai_whisper_api import (
     transcribe_openai_whisper,
 )
 from features.voice.whisper_stt import (
+    WHISPER_INITIAL_PROMPT,
+    compute_clip_metrics,
     filter_transcript,
     log_clip_metrics,
     select_whisper_prompt,
@@ -32,14 +34,6 @@ OPENAI_API_KEY = (os.getenv("OPENAI_API_KEY") or "").strip()
 WHISPER_MODEL_NAME = os.getenv("WHISPER_MODEL", "base")
 WHISPER_LANGUAGE = os.getenv("WHISPER_LANGUAGE", DEFAULT_WHISPER_LANGUAGE)
 WHISPER_PORT = int(os.getenv("WHISPER_PORT", "5002"))
-WHISPER_INITIAL_PROMPT = os.getenv(
-    "WHISPER_INITIAL_PROMPT",
-    (
-        "Transcreva em português brasileiro. Comandos de voz para o assistente musical Tangerina: "
-        "toca a música, para a música, pula a música, pausa a música, continua a música, "
-        "fila de música, volume, tangerina."
-    ),
-)
 
 _openai_client = None
 _local_model = None
@@ -99,32 +93,38 @@ def transcribe():
 
         language_param = WHISPER_LANGUAGE if WHISPER_LANGUAGE else None
         requested_prompt = (request.form.get("prompt") or "").strip()
-        duration_sec = 0.0
+        with open(tmp_path, "rb") as wav_file:
+            wav_bytes = wav_file.read()
+        wav_buffer = io.BytesIO(wav_bytes)
         try:
-            with open(tmp_path, "rb") as wav_file:
-                duration_sec = wav_duration_seconds(wav_file)
+            duration_sec = wav_duration_seconds(io.BytesIO(wav_bytes))
         except Exception:
             duration_sec = 0.0
-        if requested_prompt:
-            prompt = requested_prompt
-            full_prompt = requested_prompt
-        else:
-            full_prompt = (WHISPER_INITIAL_PROMPT or "").strip()
-            prompt = select_whisper_prompt(full_prompt, duration_sec)
+        full_prompt = requested_prompt or (WHISPER_INITIAL_PROMPT or "").strip()
+        prompt = full_prompt if requested_prompt else select_whisper_prompt(full_prompt, duration_sec)
         try:
             import audioop
+            import wave
 
-            with wave.open(tmp_path, "rb") as wav_file:
-                pcm = wav_file.readframes(wav_file.getnframes())
-                rms = audioop.rms(pcm, wav_file.getsampwidth())
-            log_clip_metrics(
-                {
-                    "duration_sec": duration_sec,
-                    "rms": rms,
-                    "wav_bytes": os.path.getsize(tmp_path),
-                    "pcm_bytes": len(pcm),
-                }
+            with wave.open(io.BytesIO(wav_bytes), "rb") as wav_file:
+                sample_rate = wav_file.getframerate()
+                sample_width = wav_file.getsampwidth()
+                pcm_mono = audioop.tomono(
+                    wav_file.readframes(wav_file.getnframes()),
+                    sample_width,
+                    1.0,
+                    1.0,
+                )
+            metrics = compute_clip_metrics(
+                pcm_mono,
+                wav_buffer,
+                sample_rate=sample_rate,
+                sample_width=sample_width,
+                channels=1,
             )
+            if duration_sec > 0:
+                metrics["duration_sec"] = duration_sec
+            log_clip_metrics(metrics)
         except Exception as metric_error:
             logger.debug("Could not log sidecar clip metrics: %s", metric_error)
         with _transcribe_lock:

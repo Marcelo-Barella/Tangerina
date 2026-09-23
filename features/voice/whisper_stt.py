@@ -13,6 +13,14 @@ SHORT_WHISPER_PROMPT = os.getenv(
     "WHISPER_SHORT_INITIAL_PROMPT",
     "Transcreva em português brasileiro.",
 )
+WHISPER_INITIAL_PROMPT = os.getenv(
+    "WHISPER_INITIAL_PROMPT",
+    (
+        "Transcreva em português brasileiro. Comandos de voz para o assistente musical Tangerina: "
+        "toca a música, para a música, pula a música, pausa a música, continua a música, "
+        "fila de música, volume, tangerina."
+    ),
+)
 PROMPT_HALLUCINATION_OVERLAP = float(os.getenv("WHISPER_PROMPT_OVERLAP_REJECT", "0.55"))
 
 _CJK_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]")
@@ -122,11 +130,10 @@ def is_prompt_hallucination(text: str, full_prompt: str) -> bool:
     if _CJK_RE.search(cleaned):
         return True
     lower = cleaned.lower()
+    words = _WORD_RE.findall(lower)
     if any(phrase in lower for phrase in _HALLUCINATION_PHRASES):
-        words = _WORD_RE.findall(lower)
         if len(words) <= 12:
             return True
-    words = _WORD_RE.findall(lower)
     if len(words) < 2:
         return False
     word_set = set(words)

@@ -5,7 +5,7 @@ import wave
 import pytest
 
 from features.voice import whisper_stt
-from features.voice.voice_commands import WHISPER_INITIAL_PROMPT
+from features.voice.whisper_stt import WHISPER_INITIAL_PROMPT
 
 
 def _make_wav(duration_sec: float, sample_rate: int = 48000) -> io.BytesIO:
