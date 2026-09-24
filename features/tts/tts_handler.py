@@ -210,14 +210,15 @@ async def speak_tts_unified(
     music_bot,
     _resolve_voice_channel,
     ytdl,
-    YTDLSource
+    YTDLSource,
+    mixed_volume_override: Optional[float] = None,
 ) -> Dict[str, Any]:
     http_provider = HTTP_TTS_PROVIDERS.get(tts_provider)
     provider_label = http_provider['label'] if http_provider else 'ElevenLabs'
 
     if http_provider:
         cleanup_delay = http_provider['cleanup_delay']
-        mixed_volume = http_provider['mixed_volume']
+        mixed_volume = mixed_volume_override if mixed_volume_override is not None else http_provider['mixed_volume']
         if tts_provider not in tts_providers or not tts_providers[tts_provider]:
             return {'success': False, 'error': f'{provider_label} TTS not configured'}
 
@@ -244,7 +245,7 @@ async def speak_tts_unified(
             audio_file = tmp_fp.name
         
         cleanup_delay = ELEVEN_CLEANUP_DELAY
-        mixed_volume = ELEVEN_MIXED_VOLUME
+        mixed_volume = mixed_volume_override if mixed_volume_override is not None else ELEVEN_MIXED_VOLUME
         use_ffmpeg_direct = False
 
     resolved_channel_id, error = await _resolve_voice_channel(guild_id, channel_id)

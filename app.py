@@ -178,13 +178,20 @@ if create_omnivoice_client and (
 music_bot.chatbot = chatbot
 music_bot.tts_providers = tts_providers
 
-async def speak_tts(guild_id: int, channel_id: int, text: str, provider: Optional[str] = None) -> Dict[str, Any]:
+async def speak_tts(
+    guild_id: int,
+    channel_id: int,
+    text: str,
+    provider: Optional[str] = None,
+    mixed_volume: Optional[float] = None,
+) -> Dict[str, Any]:
     return await speak_tts_unified(
         guild_id, channel_id, text, provider or TTS_PROVIDER, tts_providers,
         tts_generate, set_eleven_api_key, ELEVEN_API_KEY,
         "iP95p4xoKVk53GoZ742B", "eleven_multilingual_v2", "mp3_44100_128",
         music_bot, lambda gid, cid: _resolve_voice_channel(gid, cid, bot, music_bot),
-        music_bot.ytdl, YTDLSource
+        music_bot.ytdl, YTDLSource,
+        mixed_volume_override=mixed_volume,
     )
 
 music_bot.speak_tts_func = speak_tts

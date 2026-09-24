@@ -59,6 +59,7 @@ try:
 except ImportError:
     OpusError = Exception
 
+from chatbot.typesafe_settings import VOICE_CONVERSATION, VOICE_FAST_COMMAND, VOICE_IGNORE
 from features.voice.openai_whisper_api import (
     DEFAULT_WHISPER_LANGUAGE,
     TRANSCRIPTION_TIMEOUT,
@@ -337,14 +338,65 @@ class VoiceCommandSink(BaseSink):
         except Exception as e:
             logger.error(f"Error processing speech from {member.display_name}: {e}")
 
+    def _strip_wake_word(self, text: str, text_lower: str, wake_present: bool) -> str:
+        if not wake_present:
+            return text.strip()
+        wake_word_index = text_lower.find(WAKE_WORD)
+        if wake_word_index < 0:
+            return text.strip()
+        command_text = text[wake_word_index + len(WAKE_WORD):].strip()
+        return re.sub(r'^[,.\s]+', '', command_text)
+
+    def _music_app_functions(self) -> Dict[str, Any]:
+        return {
+            "get_user_voice_channel": self.music_service.get_user_voice_channel,
+            "play_music": self.music_service.play_music,
+            "play_spotify_music": self.music_service.play_spotify_music,
+            "stop_music": self.music_service.stop_music,
+            "skip_music": self.music_service.skip_music,
+            "pause_music": self.music_service.pause_music,
+            "resume_music": self.music_service.resume_music,
+            "set_volume": self.music_service.set_volume,
+            "get_queue": self.music_service.get_queue,
+            "leave_music": self.music_service.leave_music,
+            "speak_tts": self.speak_tts_func,
+        }
+
     async def _route_speech(self, member: discord.Member, text: str) -> None:
         text_lower = text.lower().strip()
         is_listening = self.listening_mode.get(member.id, False)
-        
-        if WAKE_WORD in text_lower:
-            wake_word_index = text_lower.find(WAKE_WORD)
-            command_text = text[wake_word_index + len(WAKE_WORD):].strip()
-            command_text = re.sub(r'^[,.\s]+', '', command_text)
+        wake_present = WAKE_WORD in text_lower
+
+        router = getattr(self.chatbot, "typesafe_router", None) if self.chatbot else None
+        if router and router.enabled:
+            decision = await router.evaluate_voice_transcript(
+                text.strip(),
+                listening_mode=is_listening,
+                wake_word_present=wake_present,
+            )
+            if not decision.usable:
+                return
+            if not decision.use_legacy_routing:
+                if decision.path == VOICE_IGNORE:
+                    return
+                if decision.path == VOICE_FAST_COMMAND:
+                    command_text = self._strip_wake_word(text, text_lower, wake_present)
+                    await self._handle_voice_command(member, command_text)
+                    return
+                if decision.path == VOICE_CONVERSATION:
+                    if is_listening:
+                        await self._handle_listening_mode(member, text.strip())
+                        return
+                    if decision.wake_for_conversation:
+                        command_text = self._strip_wake_word(text, text_lower, wake_present)
+                        if not command_text:
+                            await self._activate_listening_mode(member)
+                            return
+                    await self._handle_listening_mode(member, text.strip())
+                    return
+
+        if wake_present:
+            command_text = self._strip_wake_word(text, text_lower, wake_present)
             
             if command_text and not is_listening:
                 await self._handle_voice_command(member, command_text)
@@ -672,7 +724,7 @@ class VoiceCommandSink(BaseSink):
         if not isinstance(retrieved_memories, dict):
             retrieved_memories = {"recent": [], "semantic": retrieved_memories if isinstance(retrieved_memories, list) else []}
         response = await self.chatbot.generate_response_with_tools(
-            text, [], self.guild_id, None, member.id, {}, retrieved_memories
+            text, [], self.guild_id, None, member.id, self._music_app_functions(), retrieved_memories
         )
         if isinstance(response, tuple):
             response, tool_calls = response
@@ -684,11 +736,51 @@ class VoiceCommandSink(BaseSink):
         return response
 
     async def _speak_response_if_enabled(self, response: str) -> None:
-        if 'piper' not in self.tts_providers or not self.tts_providers['piper'] or not self.speak_tts_func:
+        if not self.speak_tts_func or not self.tts_providers:
             return
         voice_client = self.music_service.music_bot.voice_clients.get(self.guild_id)
-        if voice_client and voice_client.is_connected():
-            await self.speak_tts_func(self.guild_id, voice_client.channel.id, response, 'piper')
+        if not voice_client or not voice_client.is_connected():
+            return
+
+        available_providers = [
+            name
+            for name in ("piper", "elevenlabs", "omnivoice")
+            if name in self.tts_providers and self.tts_providers[name]
+        ]
+        if not available_providers:
+            return
+
+        default_provider = os.getenv("TTS_PROVIDER", "piper")
+        if default_provider not in available_providers:
+            default_provider = available_providers[0]
+
+        music_playing = bool(
+            voice_client.is_playing()
+            or self.music_service.music_bot.current_songs.get(self.guild_id)
+        )
+
+        provider = default_provider
+        mixed_volume = None
+        router = getattr(self.chatbot, "typesafe_router", None) if self.chatbot else None
+        if router and router.enabled:
+            decision = await router.evaluate_tts_playback(
+                response,
+                available_providers,
+                music_playing=music_playing,
+                default_provider=default_provider,
+            )
+            if not decision.should_speak:
+                return
+            provider = decision.provider
+            mixed_volume = decision.mixed_volume
+
+        await self.speak_tts_func(
+            self.guild_id,
+            voice_client.channel.id,
+            response,
+            provider,
+            mixed_volume,
+        )
 
     def _start_health_monitor(self) -> None:
         if self._health_monitor_started:
