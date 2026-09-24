@@ -42,24 +42,79 @@ class TestWhisperServerHealth:
         assert response.status_code == 200
         assert response.get_json() == {"status": "ok", "provider": "openai-api"}
 
-    def test_health_reports_local_without_key(self):
+    def test_health_reports_faster_whisper_by_default(self):
         module = _load_whisper_server({})
+        with patch.object(module, "FasterWhisperModel", MagicMock()):
+            client = module.app.test_client()
+            response = client.get("/health")
+        assert response.status_code == 200
+        assert response.get_json() == {"status": "ok", "provider": "faster-whisper"}
+
+    def test_health_reports_openai_whisper_when_selected(self):
+        module = _load_whisper_server({"WHISPER_LOCAL_ENGINE": "openai-whisper"})
         with patch.object(module, "whisper", MagicMock()):
             client = module.app.test_client()
             response = client.get("/health")
         assert response.status_code == 200
-        assert response.get_json() == {"status": "ok", "provider": "local"}
+        assert response.get_json() == {"status": "ok", "provider": "openai-whisper"}
 
     def test_health_503_when_no_backend(self):
         module = _load_whisper_server({})
-        with patch.object(module, "whisper", None):
+        with patch.object(module, "FasterWhisperModel", None), patch.object(module, "whisper", None):
             client = module.app.test_client()
             response = client.get("/health")
         assert response.status_code == 503
 
 
 @pytest.mark.unit
-class TestWhisperServerTranscribe:
+class TestWhisperServerReady:
+    def test_ready_openai_api_mode(self):
+        module = _load_whisper_server({"OPENAI_API_KEY": "sk-test"})
+        client = module.app.test_client()
+        response = client.get("/ready")
+        assert response.status_code == 200
+        assert response.get_json() == {
+            "state": "ready",
+            "provider": "openai-api",
+            "model_loaded": True,
+        }
+
+    def test_ready_cold_local_without_warm(self):
+        module = _load_whisper_server({})
+        with patch.object(module, "FasterWhisperModel", MagicMock()):
+            client = module.app.test_client()
+            response = client.get("/ready")
+        assert response.status_code == 503
+        body = response.get_json()
+        assert body["state"] == "cold"
+        assert body["model_loaded"] is False
+        assert body["provider"] == "faster-whisper"
+
+    def test_ready_warm_loads_local_model(self):
+        module = _load_whisper_server({})
+        mock_model = MagicMock()
+        with patch.object(module, "FasterWhisperModel", MagicMock()):
+            with patch.object(module, "_load_local_model", return_value=mock_model):
+                client = module.app.test_client()
+                response = client.get("/ready?warm=1")
+        assert response.status_code == 200
+        body = response.get_json()
+        assert body["state"] == "ready"
+        assert body["model_loaded"] is True
+        assert body["provider"] == "faster-whisper"
+        assert body["load_ms"] is not None
+
+    def test_ready_warm_error(self):
+        module = _load_whisper_server({})
+        with patch.object(module, "FasterWhisperModel", MagicMock()):
+            with patch.object(module, "_load_local_model", side_effect=RuntimeError("boom")):
+                client = module.app.test_client()
+                response = client.get("/ready?warm=1")
+        assert response.status_code == 503
+        body = response.get_json()
+        assert body["state"] == "error"
+        assert body["last_error"] == "boom"
+
     def test_transcribe_requires_file(self):
         module = _load_whisper_server({"OPENAI_API_KEY": "sk-test"})
         client = module.app.test_client()
@@ -88,8 +143,23 @@ class TestWhisperServerTranscribe:
         assert kwargs["language"] == "pt"
         assert kwargs["prompt"] == "test prompt"
 
-    def test_transcribe_falls_back_to_local_without_key(self):
+    def test_transcribe_uses_faster_whisper_without_key(self):
         module = _load_whisper_server({})
+        mock_model = MagicMock()
+        with patch.object(module, "_load_local_model", return_value=mock_model):
+            with patch.object(module, "_transcribe_faster_whisper", return_value="local text") as transcribe:
+                client = module.app.test_client()
+                response = client.post(
+                    "/transcribe",
+                    data={"file": (BytesIO(b"RIFF"), "audio.wav")},
+                    content_type="multipart/form-data",
+                )
+        assert response.status_code == 200
+        assert response.get_json() == {"text": "local text"}
+        transcribe.assert_called_once()
+
+    def test_transcribe_uses_openai_whisper_engine(self):
+        module = _load_whisper_server({"WHISPER_LOCAL_ENGINE": "openai-whisper"})
         mock_model = MagicMock()
         mock_model.transcribe.return_value = {"text": "local text"}
         with patch.object(module, "_load_local_model", return_value=mock_model):
@@ -101,13 +171,42 @@ class TestWhisperServerTranscribe:
             )
         assert response.status_code == 200
         assert response.get_json() == {"text": "local text"}
+        mock_model.transcribe.assert_called_once()
 
     def test_transcribe_ignores_blank_api_key(self):
         module = _load_whisper_server({"OPENAI_API_KEY": "   "})
-        mock_model = MagicMock()
-        mock_model.transcribe.return_value = {"text": "local text"}
-        with patch.object(module, "whisper", MagicMock()):
-            with patch.object(module, "_load_local_model", return_value=mock_model):
-                client = module.app.test_client()
-                response = client.get("/health")
-        assert response.get_json()["provider"] == "local"
+        with patch.object(module, "FasterWhisperModel", MagicMock()):
+            client = module.app.test_client()
+            response = client.get("/health")
+        assert response.get_json()["provider"] == "faster-whisper"
+
+    def test_health_stays_local_when_openai_base_url_set(self):
+        module = _load_whisper_server({
+            "OPENAI_API_KEY": "ollama",
+            "OPENAI_BASE_URL": "http://127.0.0.1:11434/v1",
+        })
+        with patch.object(module, "FasterWhisperModel", MagicMock()):
+            client = module.app.test_client()
+            response = client.get("/health")
+        assert response.status_code == 200
+        assert response.get_json()["provider"] == "faster-whisper"
+
+    def test_health_force_openai_api_with_base_url(self):
+        module = _load_whisper_server({
+            "OPENAI_API_KEY": "ollama",
+            "OPENAI_BASE_URL": "http://127.0.0.1:11434/v1",
+            "WHISPER_USE_OPENAI_API": "1",
+        })
+        client = module.app.test_client()
+        response = client.get("/health")
+        assert response.get_json()["provider"] == "openai-api"
+
+    def test_health_force_local_despite_api_key(self):
+        module = _load_whisper_server({
+            "OPENAI_API_KEY": "sk-test",
+            "WHISPER_USE_OPENAI_API": "0",
+        })
+        with patch.object(module, "FasterWhisperModel", MagicMock()):
+            client = module.app.test_client()
+            response = client.get("/health")
+        assert response.get_json()["provider"] == "faster-whisper"
