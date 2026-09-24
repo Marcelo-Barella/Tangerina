@@ -17,6 +17,9 @@ RUN pip install --no-cache-dir \
     openai \
     openai-whisper
 
+COPY features/__init__.py /app/features/__init__.py
+COPY features/voice/__init__.py /app/features/voice/__init__.py
+COPY features/voice/whisper_stt.py /app/features/voice/whisper_stt.py
 COPY features/voice/openai_whisper_api.py /app/features/voice/openai_whisper_api.py
 COPY deploy/whisper/server.py /app/server.py
 COPY deploy/whisper/entrypoint.sh /app/entrypoint.sh
